@@ -365,11 +365,12 @@ class YouTubeAutomationAgent {
     this.app.put('/api/account', this.requireAuth(), async (req, res) => {
       try {
         const currentPassword = typeof req.body?.currentPassword === 'string' ? req.body.currentPassword : '';
-        const username = typeof req.body?.username === 'string' ? req.body.username.trim() : '';
+        const requestedUsername = typeof req.body?.username === 'string' ? req.body.username.trim() : '';
         const newPassword = typeof req.body?.newPassword === 'string' ? req.body.newPassword : '';
-        if (!/^[a-zA-Z0-9._-]{3,40}$/.test(username)) return res.status(400).json({ success: false, error: 'Use de 3 a 40 caracteres no usuário.' });
-        if (newPassword.length < 12) return res.status(400).json({ success: false, error: 'A nova senha deve ter pelo menos 12 caracteres.' });
         const user = await this.db.getUserByUsername(req.user.username);
+        const username = requestedUsername || user?.username || '';
+        if (!/^[a-zA-Z0-9._-]{3,40}$/.test(username)) return res.status(400).json({ success: false, field: 'username', error: 'O usuário deve ter de 3 a 40 caracteres e usar apenas letras, números, ponto, hífen ou sublinhado.' });
+        if (newPassword.length < 12) return res.status(400).json({ success: false, field: 'newPassword', error: 'A nova senha deve ter pelo menos 12 caracteres.' });
         if (!user || !this.verifyPasswordHash(currentPassword, user.password_hash)) return res.status(403).json({ success: false, error: 'A senha atual está incorreta.' });
         const existing = await this.db.getUserByUsername(username);
         if (existing && existing.id !== user.id) return res.status(409).json({ success: false, error: 'Este usuário já está em uso.' });

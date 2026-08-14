@@ -238,13 +238,13 @@ $('settings-form').addEventListener('submit', async (event) => {
 
 async function loadSettings() {
   const [response, authResponse] = await Promise.all([request('/settings'), request('/api/auth/status')]);
+  if (authResponse.ok) $('account-username').value = (await authResponse.json()).username || '';
   if (!response.ok) return;
   const settings = await response.json();
   $('default-minutes').value = settings.default_target_minutes || 8;
   $('default-scenes').value = settings.default_scene_count || 8;
   $('target-minutes').value = settings.default_target_minutes || 8;
   $('scene-count').value = settings.default_scene_count || 8;
-  if (authResponse.ok) $('account-username').value = (await authResponse.json()).username || '';
 }
 
 $('confirm-password').addEventListener('blur', () => {
@@ -268,6 +268,8 @@ $('account-form').addEventListener('submit', async (event) => {
     message.className = 'form-message error';
     message.textContent = result.error || 'Não foi possível atualizar o acesso.';
     message.focus();
+    if (result.field === 'username') $('account-username').focus();
+    if (result.field === 'newPassword') $('new-password').focus();
     return;
   }
   message.className = 'form-message success';
