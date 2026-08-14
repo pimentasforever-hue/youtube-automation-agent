@@ -45,12 +45,12 @@ class ScriptWriterAgent {
     };
   }
 
-  async generateScript(strategy) {
+  async generateScript(strategy, options = {}) {
     try {
       this.logger.info(`Generating script for: ${strategy.topic}`);
       
       const template = this.templates[strategy.contentType.toLowerCase()] || this.templates.explainer;
-      const aiScript = await this.generateScriptWithAI(strategy, template);
+      const aiScript = await this.generateScriptWithAI(strategy, template, options);
       if (aiScript) {
         aiScript.fullScript = this.formatFullScript(aiScript);
         await this.db.saveScript(aiScript);
@@ -99,7 +99,7 @@ class ScriptWriterAgent {
     }
   }
 
-  async generateScriptWithAI(strategy, template) {
+  async generateScriptWithAI(strategy, template, options = {}) {
     if (!this.aiTextService.isAvailable()) {
       this.logger.info('Using template script generation because no AI text provider is configured');
       return null;
@@ -120,7 +120,7 @@ Topic: ${strategy.topic}
 Style/content type: ${strategy.contentType}
 Angle: ${strategy.angle}
 Target audience: ${strategy.targetAudience}
-Desired length: ${process.env.DEFAULT_VIDEO_LENGTH || '8-12 minutes'}
+Desired length: approximately ${options.targetMinutes || strategy.targetMinutes || 8} minutes, around ${(options.targetMinutes || strategy.targetMinutes || 8) * 140} spoken words
 Tone: ${template.tone}
 Pacing: ${template.pacing}
 Keywords: ${(strategy.keywords || []).join(', ')}

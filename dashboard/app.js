@@ -6,7 +6,11 @@ const viewTitles = {
   overview: ['Workspace', 'Visão geral'],
   contents: ['Biblioteca', 'Conteúdos'],
   create: ['Produção', 'Criar conteúdo'],
-  schedule: ['Planejamento', 'Agenda']
+  schedule: ['Planejamento', 'Agenda'],
+  connections: ['Sistema', 'Conexões'],
+  reports: ['Desempenho', 'Relatórios'],
+  settings: ['Sistema', 'Configurações'],
+  detail: ['Biblioteca', 'Assistir conteúdo']
 };
 const statusLabels = { processing: 'Em produção', ready: 'Pronto', scheduled: 'Agendado', published: 'Publicado', simulated: 'Precisa de atenção', failed: 'Falhou' };
 let contentItems = [];
@@ -116,10 +120,41 @@ function renderContents() {
   $('content-library').innerHTML = filtered.length ? filtered.map((item) => {
     const statusText = statusLabels[item.status] || item.status || 'Em produção';
     const youtubeLink = item.youtubeUrl ? `<a class="external-link" href="${text(item.youtubeUrl)}" target="_blank" rel="noopener noreferrer" aria-label="Abrir ${text(item.title)} no YouTube"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 4h6v6M20 4l-9 9"/><path d="M18 13v6a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h6"/></svg></a>` : '';
-    return `<article class="library-card"><span class="content-thumb" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m9 8 7 4-7 4z"/><rect x="3" y="4" width="18" height="16" rx="3"/></svg></span><div class="content-main"><strong title="${text(item.title)}">${text(item.title)}</strong><div class="library-meta"><span>${text(item.topic)}</span><span>${text(item.duration || 'Duração não informada')}</span><span>${text(formatDate(item.createdAt))}</span></div></div><div class="library-actions"><span class="status-badge status-${text(item.status)}">${text(statusText)}</span>${youtubeLink}</div></article>`;
+    return `<article class="library-card" data-content-id="${text(item.id)}" tabindex="0" role="button" aria-label="Abrir ${text(item.title)}"><span class="content-thumb" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m9 8 7 4-7 4z"/><rect x="3" y="4" width="18" height="16" rx="3"/></svg></span><div class="content-main"><strong title="${text(item.title)}">${text(item.title)}</strong><div class="library-meta"><span>${text(item.topic)}</span><span>${text(item.duration || 'Duração não informada')}</span><span>${text(formatDate(item.createdAt))}</span></div></div><div class="library-actions"><span class="status-badge status-${text(item.status)}">${text(statusText)}</span>${youtubeLink}</div></article>`;
   }).join('') : emptyState(Boolean(query || status !== 'all'));
   const emptyCreate = document.querySelector('[data-empty-create]');
   if (emptyCreate) emptyCreate.addEventListener('click', () => showView('create'));
+  document.querySelectorAll('[data-content-id]').forEach((card) => {
+    const open = (event) => { if (event.target.closest('a')) return; openContent(card.dataset.contentId); };
+    card.addEventListener('click', open);
+    card.addEventListener('keydown', (event) => { if (event.key === 'Enter' || event.key === ' ') open(event); });
+  });
+}
+
+function openContent(id) {
+  const item = contentItems.find((content) => content.id === id);
+  if (!item) return;
+  $('detail-title').textContent = item.title;
+  $('detail-status').textContent = statusLabels[item.status] || item.status;
+  $('detail-meta').textContent = `${item.topic} · ${item.duration || 'Duração não informada'} · ${formatDate(item.createdAt)}`;
+  $('video-frame').innerHTML = item.videoUrl ? `<video controls playsinline preload="metadata" src="${text(item.videoUrl)}"${item.thumbnailUrl ? ` poster="${text(item.thumbnailUrl)}"` : ''}></video>` : '<div class="video-empty"><strong>Vídeo ainda indisponível</strong><p>Quando a montagem terminar, o player aparecerá aqui.</p></div>';
+  showView('detail');
+}
+
+function updateConnections(data) {
+  const channel = data.youtube || {};
+  $('connections-grid').innerHTML = `<article class="metric-card connection-card"><span>YouTube</span><strong>${text(channel.title || 'Não conectado')}</strong><small>${channel.connected ? `${Number(channel.subscribers || 0).toLocaleString('pt-BR')} inscritos · ${Number(channel.videos || 0).toLocaleString('pt-BR')} vídeos` : 'Conexão indisponível'}</small></article><article class="metric-card"><span>Inteligência artificial</span><strong>${text(data.ai?.provider || 'Não conectada')}</strong><small>${data.ai?.connected ? 'Disponível para produção' : 'Configuração necessária'}</small></article><article class="metric-card"><span>Armazenamento</span><strong>${text(data.storage?.provider || 'Railway')}</strong><small>${text(data.storage?.bucket || 'Armazenamento local')}</small></article>`;
+  $('reports-grid').innerHTML = `<article class="metric-card"><span>Inscritos</span><strong>${Number(channel.subscribers || 0).toLocaleString('pt-BR')}</strong><small>Canal conectado</small></article><article class="metric-card"><span>Visualizações</span><strong>${Number(channel.views || 0).toLocaleString('pt-BR')}</strong><small>Total do canal</small></article><article class="metric-card"><span>Vídeos</span><strong>${Number(channel.videos || 0).toLocaleString('pt-BR')}</strong><small>Publicados no canal</small></article>`;
+}
+
+function updateJobs(jobs) {
+  const active = (jobs || []).find((job) => !['completed', 'failed'].includes(job.stage));
+  $('production-panel').hidden = !active;
+  if (!active) return;
+  $('production-stage').textContent = active.message;
+  $('production-message').textContent = `Etapa atual: ${active.stage}`;
+  $('production-percent').textContent = `${active.progress}%`;
+  $('production-progress').style.width = `${active.progress}%`;
 }
 
 function updateContents(items) {
@@ -133,13 +168,15 @@ function updateContents(items) {
 
 async function loadDashboard() {
   try {
-    const [healthResponse, scheduleResponse, analyticsResponse, contentsResponse] = await Promise.all([request('/health'), request('/schedule'), request('/analytics'), request('/contents')]);
+    const [healthResponse, scheduleResponse, analyticsResponse, contentsResponse, connectionsResponse, jobsResponse] = await Promise.all([request('/health'), request('/schedule'), request('/analytics'), request('/contents'), request('/connections'), request('/production-status')]);
     if (![healthResponse, scheduleResponse, analyticsResponse, contentsResponse].every((response) => response.ok)) throw new Error('Falha ao carregar os dados');
     updateHealth(await healthResponse.json());
     updateSchedule(await scheduleResponse.json());
     const analytics = await analyticsResponse.json();
     updateContents(await contentsResponse.json());
     updateMetrics(analytics);
+    if (connectionsResponse.ok) updateConnections(await connectionsResponse.json());
+    if (jobsResponse.ok) updateJobs(await jobsResponse.json());
   } catch (error) {
     if (error.message !== 'Sessão expirada') {
       $('system-status').textContent = 'Sem conexão';
@@ -166,13 +203,14 @@ $('generate-form').addEventListener('submit', async (event) => {
   message.className = 'form-message';
   message.textContent = 'A produção começou. Esta etapa pode levar alguns minutos.';
   try {
-    const response = await request('/generate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ topic: $('topic').value.trim() || null, style: $('style').value, length: $('length').value }) });
+    const response = await request('/generate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ topic: $('topic').value.trim() || null, style: $('style').value, targetMinutes: Number($('target-minutes').value), sceneCount: Number($('scene-count').value), privacy: $('privacy').value, narration: $('narration').checked, captions: $('captions').checked, autoPublish: $('auto-publish').checked }) });
     const result = await response.json();
     if (!response.ok) throw new Error(result.error || 'Não foi possível iniciar a produção.');
     message.className = 'form-message success';
-    message.textContent = `Conteúdo criado: ${result.result?.title || 'novo vídeo'}.`;
+    message.textContent = 'Produção iniciada. Você pode acompanhar o progresso na visão geral.';
     $('topic').value = '';
     await loadDashboard();
+    showView('overview');
   } catch (error) {
     message.className = 'form-message error';
     message.textContent = error.message || 'Não foi possível iniciar a produção.';
@@ -182,6 +220,23 @@ $('generate-form').addEventListener('submit', async (event) => {
   }
 });
 
+$('settings-form').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const response = await request('/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ default_target_minutes: $('default-minutes').value, default_scene_count: $('default-scenes').value }) });
+  $('settings-message').textContent = response.ok ? 'Configurações salvas.' : 'Não foi possível salvar.';
+});
+
+async function loadSettings() {
+  const response = await request('/settings');
+  if (!response.ok) return;
+  const settings = await response.json();
+  $('default-minutes').value = settings.default_target_minutes || 8;
+  $('default-scenes').value = settings.default_scene_count || 8;
+  $('target-minutes').value = settings.default_target_minutes || 8;
+  $('scene-count').value = settings.default_scene_count || 8;
+}
+
 showView(window.location.hash.slice(1) || 'overview', false);
 loadDashboard();
+loadSettings();
 setInterval(loadDashboard, 30000);

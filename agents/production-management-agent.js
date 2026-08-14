@@ -2,6 +2,7 @@ const path = require('path');
 const fs = require('fs').promises;
 const { Logger } = require('../utils/logger');
 const { AIVideoGenerator } = require('../utils/ai-video-generator');
+const { R2Storage } = require('../utils/r2-storage');
 
 class ProductionManagementAgent {
   constructor(db, credentials) {
@@ -11,6 +12,7 @@ class ProductionManagementAgent {
     this.pipeline = [];
     this.assets = new Map();
     this.aiVideoGenerator = new AIVideoGenerator(credentials);
+    this.storage = new R2Storage();
   }
 
   async initialize() {
@@ -48,7 +50,7 @@ class ProductionManagementAgent {
     try {
       this.logger.info('Processing content for production...');
       
-      const { strategy, script, thumbnail, seo } = contentData;
+      const { strategy, script, thumbnail, seo, options = {} } = contentData;
       
       // Create production entry
       const productionId = this.generateProductionId();
@@ -79,6 +81,7 @@ class ProductionManagementAgent {
         scheduledPublishTime: this.calculatePublishTime(strategy),
         priority: this.calculatePriority(strategy),
         estimatedDuration: script.duration,
+        settings: options,
         createdAt: new Date().toISOString()
       };
       
@@ -92,13 +95,15 @@ class ProductionManagementAgent {
       await this.generateVideoContent(productionData);
       
       // Generate audio narration
-      await this.generateAudioNarration(productionData);
+      if (options.narration !== false) await this.generateAudioNarration(productionData);
       
       // Generate captions
-      await this.generateCaptions(productionData);
+      if (options.captions !== false) await this.generateCaptions(productionData);
       
       // Final assembly
       await this.assembleVideo(productionData);
+
+      await this.storage.uploadProductionAssets(productionData);
 
       // Mark as ready — or simulated, when no real video could be produced
       const simulated = Boolean(productionData.assets.finalVideo?.simulated);
@@ -294,7 +299,7 @@ class ProductionManagementAgent {
       const { strategy, script } = productionData;
       
       // Generate visual assets using DALL-E
-      const visualPrompts = this.createVisualPromptsFromScript(script);
+      const visualPrompts = this.createVisualPromptsFromScript(script).slice(0, productionData.settings?.sceneCount || 8);
       const visualAssets = [];
       
       for (const prompt of visualPrompts) {

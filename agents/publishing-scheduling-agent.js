@@ -61,7 +61,8 @@ class PublishingSchedulingAgent {
           seo: productionData.seo,
           thumbnail: productionData.assets.thumbnail,
           video: productionData.assets.finalVideo,
-          captions: productionData.assets.captions
+      captions: productionData.assets.captions,
+      privacy: productionData.settings?.privacy || 'private'
         },
         createdAt: new Date().toISOString()
       };
@@ -127,7 +128,7 @@ class PublishingSchedulingAgent {
         defaultAudioLanguage: metadata.seo.metadata.language
       },
       status: {
-        privacyStatus: process.env.DEFAULT_PRIVACY_STATUS || 'private',
+        privacyStatus: metadata.privacy || process.env.DEFAULT_PRIVACY_STATUS || 'private',
         publishAt: scheduleEntry.publishTime,
         selfDeclaredMadeForKids: false
       }

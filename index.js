@@ -26,6 +26,7 @@ class YouTubeAutomationAgent {
     this.app = express();
     this.isInitialized = false;
     this.loginAttempts = new Map();
+    this.productionJobs = new Map();
   }
 
   async initialize() {
@@ -220,8 +221,24 @@ class YouTubeAutomationAgent {
     const value = {
       topic: null,
       style: null,
-      length: typeof body.length === 'string' ? body.length : 'medium'
+      length: typeof body.length === 'string' ? body.length : 'medium',
+      targetMinutes: Number(body.targetMinutes || 8),
+      sceneCount: Number(body.sceneCount || 8),
+      privacy: typeof body.privacy === 'string' ? body.privacy : 'private',
+      narration: body.narration !== false,
+      captions: body.captions !== false,
+      autoPublish: body.autoPublish === true
     };
+
+    if (!Number.isInteger(value.targetMinutes) || value.targetMinutes < 1 || value.targetMinutes > 30) {
+      return { valid: false, status: 400, error: 'targetMinutes must be an integer between 1 and 30' };
+    }
+    if (!Number.isInteger(value.sceneCount) || value.sceneCount < 3 || value.sceneCount > 24) {
+      return { valid: false, status: 400, error: 'sceneCount must be an integer between 3 and 24' };
+    }
+    if (!['private', 'unlisted', 'public'].includes(value.privacy)) {
+      return { valid: false, status: 400, error: 'privacy must be private, unlisted, or public' };
+    }
 
     // JSON has no `undefined`, so clients send `null` to mean "no value provided".
     // Both are treated as "not set" here: topic/style are optional and default to
@@ -270,7 +287,7 @@ class YouTubeAutomationAgent {
     this.app.set('trust proxy', 1);
     this.app.use(express.json({ limit: '1mb' }));
     this.app.use((_req, res, next) => {
-      res.setHeader('Content-Security-Policy', "default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'");
+      res.setHeader('Content-Security-Policy', "default-src 'self'; img-src 'self' data: https:; media-src 'self' https://media.gate-arcana.digital https://*.r2.dev; style-src 'self'; script-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'");
       res.setHeader('Referrer-Policy', 'no-referrer');
       res.setHeader('X-Content-Type-Options', 'nosniff');
       res.setHeader('X-Frame-Options', 'DENY');
@@ -352,12 +369,29 @@ class YouTubeAutomationAgent {
           return res.status(validation.status).json({ success: false, error: validation.error });
         }
 
-        const { topic, style, length } = validation.value;
-        const result = await this.generateContent(topic, style, length);
-        res.json({ success: true, result });
+        const jobId = `job_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
+        const options = validation.value;
+        this.updateProductionJob(jobId, 'queued', 3, 'Produção adicionada à fila');
+        res.status(202).json({ success: true, jobId });
+        Promise.resolve().then(async () => {
+          try {
+            const result = await this.generateContent(options.topic, options.style, options.length, options, jobId);
+            this.updateProductionJob(jobId, 'completed', 100, 'Conteúdo pronto', result);
+          } catch (error) {
+            this.updateProductionJob(jobId, 'failed', 100, error.message);
+            this.logger.error(`Production job ${jobId} failed:`, error);
+          }
+        });
       } catch (error) {
         res.status(500).json({ success: false, error: error.message });
       }
+    });
+
+    this.app.get('/production-status', this.requireAuth(), (_req, res) => {
+      const jobs = Array.from(this.productionJobs.values())
+        .sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt))
+        .slice(0, 20);
+      res.json(jobs);
     });
 
     // Get analytics
@@ -389,6 +423,66 @@ class YouTubeAutomationAgent {
       }
     });
 
+    this.app.get('/contents/:contentId', this.requireAuth(), async (req, res) => {
+      try {
+        const contents = await this.db.getContentLibrary();
+        const content = contents.find((item) => item.id === req.params.contentId);
+        if (!content) return res.status(404).json({ error: 'Conteúdo não encontrado.' });
+        return res.json(content);
+      } catch (error) {
+        return res.status(500).json({ error: error.message });
+      }
+    });
+
+    this.app.get('/connections', this.requireAuth(), async (_req, res) => {
+      try {
+        const youtube = this.credentials.getYouTubeClient();
+        const response = await youtube.channels.list({ part: 'snippet,statistics,brandingSettings,contentDetails,status', mine: true });
+        const channel = response.data.items?.[0];
+        if (!channel) return res.status(404).json({ error: 'Nenhum canal encontrado nesta conta.' });
+        res.json({
+          youtube: {
+            connected: true,
+            id: channel.id,
+            title: channel.snippet?.title,
+            description: channel.snippet?.description,
+            customUrl: channel.snippet?.customUrl,
+            country: channel.snippet?.country,
+            createdAt: channel.snippet?.publishedAt,
+            thumbnail: channel.snippet?.thumbnails?.medium?.url || channel.snippet?.thumbnails?.default?.url,
+            subscribers: Number(channel.statistics?.subscriberCount || 0),
+            views: Number(channel.statistics?.viewCount || 0),
+            videos: Number(channel.statistics?.videoCount || 0),
+            privacyStatus: channel.status?.privacyStatus,
+            uploadsPlaylist: channel.contentDetails?.relatedPlaylists?.uploads
+          },
+          ai: { connected: this.credentials.hasAITextProvider(), provider: process.env.GEMINI_API_KEY ? 'Gemini' : process.env.OPENAI_API_KEY ? 'OpenAI' : null },
+          storage: { connected: Boolean(process.env.R2_ACCOUNT_ID && process.env.R2_ACCESS_KEY_ID && process.env.R2_SECRET_ACCESS_KEY && process.env.R2_BUCKET), provider: process.env.R2_BUCKET ? 'Cloudflare R2' : 'Railway Volume', bucket: process.env.R2_BUCKET || null }
+        });
+      } catch (error) {
+        res.status(500).json({ error: error.message });
+      }
+    });
+
+    const allowedSettings = new Set(['default_target_minutes', 'default_scene_count', 'default_privacy', 'default_narration', 'default_captions', 'auto_publish_enabled']);
+    this.app.get('/settings', this.requireAuth(), async (_req, res) => {
+      try {
+        const settings = await this.db.getAllSettings();
+        res.json(Object.fromEntries(Object.entries(settings).filter(([key]) => allowedSettings.has(key))));
+      } catch (error) {
+        res.status(500).json({ error: error.message });
+      }
+    });
+    this.app.put('/settings', this.requireAuth(), async (req, res) => {
+      try {
+        const entries = Object.entries(req.body || {}).filter(([key]) => allowedSettings.has(key));
+        for (const [key, value] of entries) await this.db.setSetting(key, String(value));
+        res.json({ success: true });
+      } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+      }
+    });
+
     // Manual publish
     this.app.post('/publish/:contentId', this.requireAuth(), async (req, res) => {
       try {
@@ -401,32 +495,45 @@ class YouTubeAutomationAgent {
     });
   }
 
-  async generateContent(topic = null, style = null, length = 'medium') {
+  updateProductionJob(id, stage, progress, message, result = null) {
+    const existing = this.productionJobs.get(id) || { id, startedAt: new Date().toISOString() };
+    this.productionJobs.set(id, { ...existing, stage, progress, message, result, updatedAt: new Date().toISOString() });
+  }
+
+  async generateContent(topic = null, style = null, length = 'medium', options = {}, jobId = null) {
     this.logger.info('Starting content generation pipeline...');
     
     // Step 1: Strategy
+    if (jobId) this.updateProductionJob(jobId, 'strategy', 10, 'Definindo tema e abordagem');
     const strategy = await this.agents.strategy.generateContentStrategy(topic);
+    strategy.targetMinutes = options.targetMinutes || 8;
     this.logger.info(`Strategy generated: ${strategy.topic}`);
     
     // Step 2: Script Writing
-    const script = await this.agents.scriptWriter.generateScript(strategy);
+    if (jobId) this.updateProductionJob(jobId, 'script', 25, 'Escrevendo o roteiro');
+    const script = await this.agents.scriptWriter.generateScript(strategy, { targetMinutes: strategy.targetMinutes });
     this.logger.info(`Script generated: ${script.title}`);
     
     // Step 3: Thumbnail Design
+    if (jobId) this.updateProductionJob(jobId, 'thumbnail', 40, 'Criando a miniatura');
     const thumbnail = await this.agents.thumbnailDesigner.generateThumbnail(script);
     this.logger.info('Thumbnail generated');
     
     // Step 4: SEO Optimization
+    if (jobId) this.updateProductionJob(jobId, 'seo', 52, 'Preparando título, descrição e SEO');
     const seoData = await this.agents.seoOptimizer.optimize(script, strategy);
     this.logger.info('SEO optimization complete');
     
     // Step 5: Production Management
+    if (jobId) this.updateProductionJob(jobId, 'production', 65, 'Gerando áudio, cenas e legendas');
     const productionData = await this.agents.production.processContent({
       strategy,
       script,
       thumbnail,
-      seo: seoData
+      seo: seoData,
+      options
     });
+    productionData.settings = options;
     this.logger.info('Production processing complete');
 
     // Step 6: Save to database
@@ -434,7 +541,8 @@ class YouTubeAutomationAgent {
     this.logger.info(`Content saved with ID: ${contentId}`);
 
     // Step 7: Add to the publish queue (skipped automatically for simulated output)
-    const scheduleEntry = await this.agents.publishing.scheduleContent(productionData);
+    if (jobId) this.updateProductionJob(jobId, 'scheduling', 92, 'Salvando e preparando a publicação');
+    const scheduleEntry = options.autoPublish === false ? null : await this.agents.publishing.scheduleContent(productionData);
     if (scheduleEntry) {
       this.logger.info(`Content queued for publishing at ${scheduleEntry.publishTime}`);
     }

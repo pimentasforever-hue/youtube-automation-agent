@@ -213,7 +213,12 @@ class Database {
       ['content_backup_enabled', 'true', 'Enable content backup'],
       ['notification_enabled', 'true', 'Enable system notifications'],
       ['max_daily_posts', '1', 'Maximum posts per day'],
-      ['content_buffer_days', '3', 'Days of content to keep in buffer']
+      ['content_buffer_days', '3', 'Days of content to keep in buffer'],
+      ['default_target_minutes', '8', 'Default target video duration in minutes'],
+      ['default_scene_count', '8', 'Default number of visual scenes'],
+      ['default_privacy', 'private', 'Default YouTube privacy'],
+      ['default_narration', 'true', 'Generate narration by default'],
+      ['default_captions', 'true', 'Generate captions by default']
     ];
 
     for (const [key, value, description] of defaultSettings) {
@@ -227,6 +232,7 @@ class Database {
   // Content Strategy methods
   async saveContentStrategy(strategy) {
     const id = this.generateId('strategy');
+    strategy.id = id;
     await this.executeQuery(
       `INSERT INTO content_strategies (
         id, topic, angle, target_audience, content_type, keywords, 
@@ -255,6 +261,7 @@ class Database {
   // Script methods
   async saveScript(script) {
     const id = this.generateId('script');
+    script.id = id;
     await this.executeQuery(
       `INSERT INTO scripts (
         id, title, hook, introduction, main_content, conclusion, 
@@ -281,6 +288,7 @@ class Database {
   // Thumbnail methods
   async saveThumbnail(thumbnail) {
     const id = this.generateId('thumbnail');
+    thumbnail.id = id;
     await this.executeQuery(
       `INSERT INTO thumbnails (
         id, path, concept, prompt, dimensions, file_size
@@ -300,6 +308,7 @@ class Database {
   // SEO methods
   async saveSEOData(seoData) {
     const id = this.generateId('seo');
+    seoData.id = id;
     await this.executeQuery(
       `INSERT INTO seo_data (
         id, title, description, tags, hashtags, chapters, 
@@ -420,6 +429,8 @@ class Database {
         createdAt: row.created_at,
         thumbnailPath: row.thumbnail_path,
         youtubeUrl: row.youtube_url,
+        videoUrl: assets.finalVideo?.url || row.youtube_url || null,
+        thumbnailUrl: assets.thumbnail?.url || null,
         publishedAt: row.published_at,
         assets,
         timeline: JSON.parse(row.timeline || '{}')
