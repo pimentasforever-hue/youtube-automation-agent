@@ -202,7 +202,7 @@ function updateJobs(jobs) {
     dock.hidden = true;
     return;
   }
-  const finishedRecently = ['completed', 'failed'].includes(latest.stage) && Date.now() - new Date(latest.updatedAt).getTime() < 15 * 60 * 1000;
+  const finishedRecently = latest.stage === 'completed' && Date.now() - new Date(latest.updatedAt).getTime() < 2 * 60 * 1000;
   dock.hidden = !active && !finishedRecently;
   const shown = active || latest;
   dock.classList.toggle('failed', shown.stage === 'failed');
