@@ -32,6 +32,16 @@ class CredentialManager {
     } catch (error) {
       this.credentials = {};
     }
+
+    // Hosted environments such as Railway should not need credential files in
+    // the application image. Environment variables also keep secrets out of git.
+    if (process.env.YOUTUBE_CLIENT_ID && process.env.YOUTUBE_CLIENT_SECRET) {
+      this.credentials.youtube = {
+        client_id: process.env.YOUTUBE_CLIENT_ID,
+        client_secret: process.env.YOUTUBE_CLIENT_SECRET,
+        redirect_uris: [process.env.YOUTUBE_REDIRECT_URI || 'http://localhost:8080/oauth2callback']
+      };
+    }
   }
 
   async loadTokens() {
@@ -40,6 +50,14 @@ class CredentialManager {
       this.tokens = JSON.parse(data);
     } catch (error) {
       this.tokens = {};
+    }
+
+    if (process.env.YOUTUBE_TOKENS_JSON) {
+      try {
+        this.tokens.youtube = JSON.parse(process.env.YOUTUBE_TOKENS_JSON);
+      } catch (error) {
+        throw new Error('YOUTUBE_TOKENS_JSON must contain valid JSON');
+      }
     }
   }
 

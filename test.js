@@ -294,6 +294,15 @@ class SystemTest {
     }
 
     try {
+      process.env.YOUTUBE_CLIENT_ID = 'client-id';
+      process.env.YOUTUBE_CLIENT_SECRET = 'client-secret';
+      process.env.YOUTUBE_TOKENS_JSON = JSON.stringify({ refresh_token: 'refresh-token' });
+      await manager.loadCredentials();
+      await manager.loadTokens();
+      if (!manager.credentials.youtube || manager.tokens.youtube.refresh_token !== 'refresh-token') {
+        throw new Error('Environment-based YouTube credentials were not loaded');
+      }
+
       manager.credentials = { youtube: { client_id: 'x' }, gemini: { apiKey: 'gm-test' } };
       if (manager.getMissingCredentials().length !== 0) {
         throw new Error('Gemini-only configuration was incorrectly reported as missing credentials');
@@ -316,6 +325,9 @@ class SystemTest {
         throw new Error('Missing YouTube credentials were not detected');
       }
     } finally {
+      delete process.env.YOUTUBE_CLIENT_ID;
+      delete process.env.YOUTUBE_CLIENT_SECRET;
+      delete process.env.YOUTUBE_TOKENS_JSON;
       for (const key of envKeys) {
         if (savedEnv[key] === undefined) {
           delete process.env[key];
