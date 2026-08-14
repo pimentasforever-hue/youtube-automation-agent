@@ -27,6 +27,7 @@ class YouTubeAutomationAgent {
     this.isInitialized = false;
     this.loginAttempts = new Map();
     this.productionJobs = new Map();
+    this.googleAuthStates = new Map();
   }
 
   async initialize() {
@@ -343,6 +344,44 @@ class YouTubeAutomationAgent {
 
     this.app.get('/api/auth/status', this.requireAuth(), (req, res) => {
       res.json({ authenticated: true, username: req.user.username });
+    });
+
+    this.app.get('/auth/google', this.requireAuth(), (req, res) => {
+      try {
+        const state = crypto.randomBytes(24).toString('hex');
+        this.googleAuthStates.set(state, Date.now() + (10 * 60 * 1000));
+        const oauth2Client = this.credentials.getYouTubeAuth();
+        const authUrl = oauth2Client.generateAuthUrl({
+          access_type: 'offline',
+          prompt: 'consent',
+          state,
+          scope: [
+            'https://www.googleapis.com/auth/youtube.upload',
+            'https://www.googleapis.com/auth/youtube.readonly',
+            'https://www.googleapis.com/auth/yt-analytics.readonly'
+          ]
+        });
+        return res.redirect(authUrl);
+      } catch (error) {
+        return res.redirect(`/#connections?google_error=${encodeURIComponent(error.message)}`);
+      }
+    });
+
+    this.app.get('/auth/google/callback', async (req, res) => {
+      const expiresAt = this.googleAuthStates.get(req.query.state);
+      this.googleAuthStates.delete(req.query.state);
+      if (!req.query.code || !expiresAt || expiresAt < Date.now()) return res.status(400).send('Solicitação de conexão inválida ou expirada.');
+      try {
+        const oauth2Client = this.credentials.getYouTubeAuth();
+        const { tokens } = await oauth2Client.getToken(req.query.code);
+        this.credentials.tokens.youtube = tokens;
+        await this.credentials.saveTokens();
+        this.agents.publishing.youtube = this.credentials.getYouTubeClient();
+        return res.redirect('/#connections');
+      } catch (error) {
+        this.logger.error('Google OAuth callback failed:', error);
+        return res.status(500).send('Não foi possível concluir a conexão com o Google.');
+      }
     });
 
     // Main dashboard route

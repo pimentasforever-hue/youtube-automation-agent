@@ -9,7 +9,9 @@ class CredentialManager {
   constructor() {
     this.logger = new Logger('CredentialManager');
     this.credentialsPath = path.join(__dirname, '..', 'config', 'credentials.json');
-    this.tokensPath = path.join(__dirname, '..', 'config', 'tokens.json');
+    this.tokensPath = process.env.DATA_DIR
+      ? path.join(process.env.DATA_DIR, 'youtube-tokens.json')
+      : path.join(__dirname, '..', 'config', 'tokens.json');
     this.credentials = {};
     this.tokens = {};
   }
