@@ -1,20 +1,30 @@
 /* global fetch */
 
 const $ = (id) => document.getElementById(id);
-
-const agentLabels = {
-  strategy: 'Estratégia', scriptWriter: 'Roteiro', thumbnailDesigner: 'Miniatura',
-  seoOptimizer: 'SEO', production: 'Produção', publishing: 'Publicação', analytics: 'Análise'
+const agentLabels = { strategy: 'Estratégia', scriptWriter: 'Roteiro', thumbnailDesigner: 'Miniatura', seoOptimizer: 'SEO', production: 'Produção', publishing: 'Publicação', analytics: 'Análise' };
+const viewTitles = {
+  overview: ['Workspace', 'Visão geral'],
+  contents: ['Biblioteca', 'Conteúdos'],
+  create: ['Produção', 'Criar conteúdo'],
+  schedule: ['Planejamento', 'Agenda']
 };
+const statusLabels = { processing: 'Em produção', ready: 'Pronto', scheduled: 'Agendado', published: 'Publicado', simulated: 'Precisa de atenção', failed: 'Falhou' };
+let contentItems = [];
 
 function text(value) {
-  return String(value ?? '').replace(/[&<>"]/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[character]);
+  return String(value ?? '').replace(/[&<>"']/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character]);
+}
+
+function formatDate(value) {
+  if (!value) return 'Sem data';
+  const date = new Date(value.endsWith?.('Z') || value.includes?.('+') ? value : `${value}Z`);
+  return Number.isNaN(date.getTime()) ? 'Sem data' : date.toLocaleDateString('pt-BR', { day: '2-digit', month: 'short', year: 'numeric' }).replace('.', '');
 }
 
 function formatUptime(seconds = 0) {
   const hours = Math.floor(seconds / 3600);
   const minutes = Math.floor((seconds % 3600) / 60);
-  return `${hours} h ${minutes} min em operação`;
+  return `${hours} h ${minutes} min`;
 }
 
 async function request(url, options) {
@@ -26,79 +36,141 @@ async function request(url, options) {
   return response;
 }
 
+function closeSidebar() {
+  $('sidebar').classList.remove('open');
+  $('sidebar-scrim').hidden = true;
+  $('menu-button').setAttribute('aria-expanded', 'false');
+}
+
+function showView(name, updateHash = true) {
+  const view = viewTitles[name] ? name : 'overview';
+  document.querySelectorAll('.app-view').forEach((section) => section.classList.toggle('active', section.dataset.view === view));
+  document.querySelectorAll('[data-view-link]').forEach((link) => {
+    const active = link.dataset.viewLink === view;
+    if (link.classList.contains('nav-item')) link.classList.toggle('active', active);
+    if (active && link.classList.contains('nav-item')) link.setAttribute('aria-current', 'page');
+    else link.removeAttribute('aria-current');
+  });
+  $('page-kicker').textContent = viewTitles[view][0];
+  $('page-title').textContent = viewTitles[view][1];
+  if (updateHash) window.history.replaceState(null, '', `#${view}`);
+  closeSidebar();
+  $('main-content').focus({ preventScroll: true });
+}
+
 function updateHealth(data) {
   const healthy = data.status === 'healthy' && data.initialized;
-  $('system-status').textContent = healthy ? 'Operação normal' : 'Inicializando';
-  $('header-status').textContent = healthy ? 'Sistema ativo' : 'Verificando';
+  $('system-status').textContent = healthy ? 'Sistema ativo' : 'Inicializando';
   $('agent-count').textContent = `${data.agents?.length || 0} de 7`;
   $('last-updated').textContent = `Atualizado às ${new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`;
   $('uptime').textContent = formatUptime(data.uptime);
-  $('agent-status').innerHTML = (data.agents || []).map((agent) => `
-    <div class="agent"><i aria-hidden="true"></i><span>${text(agentLabels[agent] || agent)}</span></div>
-  `).join('');
+  $('agent-status').innerHTML = (data.agents || []).map((agent) => `<div class="agent"><i aria-hidden="true"></i><span>${text(agentLabels[agent] || agent)}</span></div>`).join('');
+}
+
+function scheduleMarkup(schedule) {
+  if (!schedule.length) {
+    return '<div class="list-item"><div><strong>Geração diária</strong><br><small>Preparação automática de conteúdo</small></div><strong>06:00</strong></div><div class="list-item"><div><strong>Análise do canal</strong><br><small>Leitura de desempenho</small></div><strong>09:00</strong></div>';
+  }
+  return schedule.map((item) => {
+    const date = new Date(item.publishTime || item.scheduledTime);
+    return `<div class="list-item"><div><strong>${text(item.title || 'Nova publicação')}</strong><br><small>${text(formatDate(date.toISOString()))}</small></div><strong>${text(date.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }))}</strong></div>`;
+  }).join('');
 }
 
 function updateSchedule(items) {
   const schedule = Array.isArray(items) ? items : [];
-  if (!schedule.length) {
-    $('upcoming-schedule').innerHTML = `
-      <div class="list-item"><div><strong>Geração diária</strong><br><small>Preparação automática de conteúdo</small></div><strong>06:00</strong></div>
-      <div class="list-item"><div><strong>Análise do canal</strong><br><small>Leitura de desempenho</small></div><strong>09:00</strong></div>`;
+  const markup = scheduleMarkup(schedule.slice(0, 5));
+  $('upcoming-schedule').innerHTML = markup;
+  $('full-schedule').innerHTML = scheduleMarkup(schedule);
+  if (schedule.length) {
+    const next = new Date(schedule[0].publishTime || schedule[0].scheduledTime);
+    $('next-generation').textContent = next.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+  } else {
     $('next-generation').textContent = '06:00';
-    return;
   }
-  $('upcoming-schedule').innerHTML = schedule.slice(0, 4).map((item) => {
-    const date = new Date(item.publishTime || item.scheduledTime);
-    return `<div class="list-item"><div><strong>${text(item.title || 'Nova publicação')}</strong><br><small>${text(date.toLocaleDateString('pt-BR'))}</small></div><strong>${text(date.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }))}</strong></div>`;
-  }).join('');
-  const next = new Date(schedule[0].publishTime || schedule[0].scheduledTime);
-  $('next-generation').textContent = next.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
 }
 
 function updateMetrics(data = {}) {
-  const total = data.totalVideos || 0;
-  $('content-count').textContent = total;
-  $('published-count').textContent = data.publishedVideos ?? total;
-  $('performance-metrics').innerHTML = `
-    <div><dt>Conteúdo registrado</dt><dd>${text(total)}</dd></div>
-    <div><dt>Pontuação média</dt><dd>${text(data.averagePerformanceScore || 'Aguardando dados')}</dd></div>
-    <div><dt>Automação</dt><dd>Ativa</dd></div>`;
+  const total = Math.max(data.totalVideos || 0, contentItems.length);
+  $('content-count').textContent = total.toLocaleString('pt-BR');
+  $('published-count').textContent = (data.publishedVideos ?? contentItems.filter((item) => item.status === 'published').length).toLocaleString('pt-BR');
+}
+
+function contentRow(item) {
+  const status = statusLabels[item.status] || item.status || 'Em produção';
+  return `<div class="content-row"><span class="content-thumb" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m9 8 7 4-7 4z"/><rect x="3" y="4" width="18" height="16" rx="3"/></svg></span><div class="content-main"><strong title="${text(item.title)}">${text(item.title)}</strong><small>${text(item.topic)} · ${text(formatDate(item.createdAt))}</small></div><span class="status-badge status-${text(item.status)}">${text(status)}</span></div>`;
+}
+
+function emptyState(hasFilter) {
+  return `<div class="empty-state"><span class="empty-state-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 5.5A1.5 1.5 0 0 1 5.5 4h13A1.5 1.5 0 0 1 20 5.5v13a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 18.5z"/><path d="m10 9 5 3-5 3z"/></svg></span><h3>${hasFilter ? 'Nenhum resultado' : 'Nenhum conteúdo criado'}</h3><p>${hasFilter ? 'Tente outro termo ou selecione um status diferente.' : 'Quando você iniciar uma produção, ela aparecerá aqui com o status e a data.'}</p>${hasFilter ? '' : '<button class="primary-button" type="button" data-empty-create><span>Criar primeiro conteúdo</span></button>'}</div>`;
+}
+
+function renderContents() {
+  const query = $('content-search').value.trim().toLocaleLowerCase('pt-BR');
+  const status = $('status-filter').value;
+  const filtered = contentItems.filter((item) => {
+    const matchesText = !query || `${item.title} ${item.topic}`.toLocaleLowerCase('pt-BR').includes(query);
+    return matchesText && (status === 'all' || item.status === status);
+  });
+  $('result-count').textContent = `${filtered.length} ${filtered.length === 1 ? 'item' : 'itens'}`;
+  $('content-library').innerHTML = filtered.length ? filtered.map((item) => {
+    const statusText = statusLabels[item.status] || item.status || 'Em produção';
+    const youtubeLink = item.youtubeUrl ? `<a class="external-link" href="${text(item.youtubeUrl)}" target="_blank" rel="noopener noreferrer" aria-label="Abrir ${text(item.title)} no YouTube"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 4h6v6M20 4l-9 9"/><path d="M18 13v6a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h6"/></svg></a>` : '';
+    return `<article class="library-card"><span class="content-thumb" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m9 8 7 4-7 4z"/><rect x="3" y="4" width="18" height="16" rx="3"/></svg></span><div class="content-main"><strong title="${text(item.title)}">${text(item.title)}</strong><div class="library-meta"><span>${text(item.topic)}</span><span>${text(item.duration || 'Duração não informada')}</span><span>${text(formatDate(item.createdAt))}</span></div></div><div class="library-actions"><span class="status-badge status-${text(item.status)}">${text(statusText)}</span>${youtubeLink}</div></article>`;
+  }).join('') : emptyState(Boolean(query || status !== 'all'));
+  const emptyCreate = document.querySelector('[data-empty-create]');
+  if (emptyCreate) emptyCreate.addEventListener('click', () => showView('create'));
+}
+
+function updateContents(items) {
+  contentItems = Array.isArray(items) ? items : [];
+  $('sidebar-content-count').textContent = contentItems.length;
+  $('recent-contents').innerHTML = contentItems.length ? contentItems.slice(0, 6).map(contentRow).join('') : emptyState(false);
+  const overviewCreate = $('recent-contents').querySelector('[data-empty-create]');
+  if (overviewCreate) overviewCreate.addEventListener('click', () => showView('create'));
+  renderContents();
 }
 
 async function loadDashboard() {
   try {
-    const [healthResponse, scheduleResponse, analyticsResponse] = await Promise.all([
-      request('/health'), request('/schedule'), request('/analytics')
-    ]);
+    const [healthResponse, scheduleResponse, analyticsResponse, contentsResponse] = await Promise.all([request('/health'), request('/schedule'), request('/analytics'), request('/contents')]);
+    if (![healthResponse, scheduleResponse, analyticsResponse, contentsResponse].every((response) => response.ok)) throw new Error('Falha ao carregar os dados');
     updateHealth(await healthResponse.json());
     updateSchedule(await scheduleResponse.json());
-    updateMetrics(await analyticsResponse.json());
+    const analytics = await analyticsResponse.json();
+    updateContents(await contentsResponse.json());
+    updateMetrics(analytics);
   } catch (error) {
     if (error.message !== 'Sessão expirada') {
-      $('system-status').textContent = 'Conexão indisponível';
-      $('header-status').textContent = 'Sem conexão';
+      $('system-status').textContent = 'Sem conexão';
+      $('uptime').textContent = 'Tente atualizar';
     }
   }
 }
+
+document.querySelectorAll('[data-view-link]').forEach((link) => link.addEventListener('click', (event) => { event.preventDefault(); showView(link.dataset.viewLink); }));
+$('menu-button').addEventListener('click', () => { $('sidebar').classList.add('open'); $('sidebar-scrim').hidden = false; $('menu-button').setAttribute('aria-expanded', 'true'); });
+$('sidebar-close').addEventListener('click', closeSidebar);
+$('sidebar-scrim').addEventListener('click', closeSidebar);
+$('content-search').addEventListener('input', renderContents);
+$('status-filter').addEventListener('change', renderContents);
+$('refresh-button').addEventListener('click', loadDashboard);
+$('logout-button').addEventListener('click', async () => { await fetch('/api/auth/logout', { method: 'POST' }); window.location.assign('/login'); });
 
 $('generate-form').addEventListener('submit', async (event) => {
   event.preventDefault();
   const button = $('generate-button');
   const message = $('form-message');
   button.disabled = true;
-  button.querySelector('span').textContent = 'Iniciando produção';
+  button.querySelector('span').textContent = 'Produzindo';
   message.className = 'form-message';
-  message.textContent = 'O roteiro, a narração e os visuais estão sendo preparados.';
+  message.textContent = 'A produção começou. Esta etapa pode levar alguns minutos.';
   try {
-    const response = await request('/generate', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ topic: $('topic').value.trim() || null, style: $('style').value, length: $('length').value })
-    });
+    const response = await request('/generate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ topic: $('topic').value.trim() || null, style: $('style').value, length: $('length').value }) });
     const result = await response.json();
     if (!response.ok) throw new Error(result.error || 'Não foi possível iniciar a produção.');
     message.className = 'form-message success';
-    message.textContent = `Produção iniciada: ${result.result?.title || 'novo vídeo bíblico'}.`;
+    message.textContent = `Conteúdo criado: ${result.result?.title || 'novo vídeo'}.`;
     $('topic').value = '';
     await loadDashboard();
   } catch (error) {
@@ -110,11 +182,6 @@ $('generate-form').addEventListener('submit', async (event) => {
   }
 });
 
-$('refresh-button').addEventListener('click', loadDashboard);
-$('logout-button').addEventListener('click', async () => {
-  await fetch('/api/auth/logout', { method: 'POST' });
-  window.location.assign('/login');
-});
-
+showView(window.location.hash.slice(1) || 'overview', false);
 loadDashboard();
 setInterval(loadDashboard, 30000);

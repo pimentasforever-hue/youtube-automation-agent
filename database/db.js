@@ -324,11 +324,15 @@ class Database {
   async saveProductionData(production) {
     await this.executeQuery(
       `INSERT OR REPLACE INTO productions (
-        id, status, assets, timeline, scheduled_publish_time, 
-        priority, estimated_duration
-      ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        id, strategy_id, script_id, thumbnail_id, seo_id, status, assets,
+        timeline, scheduled_publish_time, priority, estimated_duration
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         production.id,
+        production.strategy?.id || production.strategyId || null,
+        production.script?.id || production.scriptId || null,
+        production.thumbnail?.id || production.thumbnailId || null,
+        production.seo?.id || production.seoId || null,
         production.status,
         JSON.stringify(production.assets),
         JSON.stringify(production.timeline),
@@ -364,6 +368,45 @@ class Database {
     );
     return rows.map(row => ({
       ...row,
+      assets: JSON.parse(row.assets || '{}'),
+      timeline: JSON.parse(row.timeline || '{}')
+    }));
+  }
+
+  async getContentLibrary() {
+    const rows = await this.getAllRows(
+      `SELECT
+        p.id,
+        p.status,
+        p.estimated_duration,
+        p.scheduled_publish_time,
+        p.created_at,
+        p.assets,
+        p.timeline,
+        COALESCE(s.title, ps.title, 'Conteúdo sem título') AS title,
+        COALESCE(cs.topic, 'Tema não informado') AS topic,
+        t.path AS thumbnail_path,
+        ps.youtube_url,
+        ps.published_at
+      FROM productions p
+      LEFT JOIN scripts s ON s.id = p.script_id
+      LEFT JOIN content_strategies cs ON cs.id = p.strategy_id
+      LEFT JOIN thumbnails t ON t.id = p.thumbnail_id
+      LEFT JOIN publish_schedule ps ON ps.production_id = p.id
+      ORDER BY p.created_at DESC`
+    );
+
+    return rows.map(row => ({
+      id: row.id,
+      title: row.title,
+      topic: row.topic,
+      status: row.status,
+      duration: row.estimated_duration,
+      scheduledFor: row.scheduled_publish_time,
+      createdAt: row.created_at,
+      thumbnailPath: row.thumbnail_path,
+      youtubeUrl: row.youtube_url,
+      publishedAt: row.published_at,
       assets: JSON.parse(row.assets || '{}'),
       timeline: JSON.parse(row.timeline || '{}')
     }));

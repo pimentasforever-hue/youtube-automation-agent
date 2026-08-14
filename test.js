@@ -120,6 +120,12 @@ class SystemTest {
       throw new Error('saveProductionData did not upsert the existing production row');
     }
 
+    const library = await db.getContentLibrary();
+    const libraryItem = library.find(item => item.id === production.id);
+    if (!libraryItem || libraryItem.status !== 'ready' || libraryItem.title !== 'Conteúdo sem título') {
+      throw new Error('getContentLibrary did not return the saved production');
+    }
+
     await db.executeQuery('DELETE FROM productions WHERE id = ?', [production.id]);
     await db.close();
     this.logger.info('Production persistence test completed successfully');

@@ -380,6 +380,15 @@ class YouTubeAutomationAgent {
       }
     });
 
+    this.app.get('/contents', this.requireAuth(), async (_req, res) => {
+      try {
+        const contents = await this.db.getContentLibrary();
+        res.json(contents);
+      } catch (error) {
+        res.status(500).json({ error: error.message });
+      }
+    });
+
     // Manual publish
     this.app.post('/publish/:contentId', this.requireAuth(), async (req, res) => {
       try {

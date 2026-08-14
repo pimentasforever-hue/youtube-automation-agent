@@ -7,109 +7,102 @@
   <title>Ecos da Escritura</title>
   <link rel="stylesheet" href="/styles.css">
 </head>
-<body>
-  <div class="ambient ambient-one" aria-hidden="true"></div>
-  <div class="ambient ambient-two" aria-hidden="true"></div>
+<body class="app-page">
+  <a class="skip-link" href="#main-content">Ir para o conteúdo</a>
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-head">
+      <a class="brand" href="#overview" data-view-link="overview" aria-label="Ecos da Escritura, visão geral">
+        <span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 4.75A2.75 2.75 0 0 1 7.75 2H20v17H7.75A2.75 2.75 0 0 0 5 21.75z"/><path d="M5 4.75v17M9 6h7M9 10h7"/></svg></span>
+        <span><strong>Ecos</strong><small>Content Studio</small></span>
+      </a>
+      <button class="sidebar-close" id="sidebar-close" type="button" aria-label="Fechar menu"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button>
+    </div>
 
-  <header class="glass-bar">
-    <a class="brand" href="/" aria-label="Ecos da Escritura, início">
-      <span class="brand-mark" aria-hidden="true">
-        <svg viewBox="0 0 24 24"><path d="M5 4.75A2.75 2.75 0 0 1 7.75 2H20v17H7.75A2.75 2.75 0 0 0 5 21.75z"/><path d="M5 4.75v17M9 6h7M9 10h7"/></svg>
-      </span>
-      <span><strong>Ecos da Escritura</strong><small>Estúdio de conteúdo</small></span>
-    </a>
-    <nav class="nav-actions" aria-label="Ações da conta">
-      <span class="live-indicator"><i></i><span id="header-status">Verificando</span></span>
-      <button class="icon-button" id="refresh-button" type="button" aria-label="Atualizar painel">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6v5h-5"/><path d="M18.5 15a7 7 0 1 1-1.2-8.2L20 11"/></svg>
-      </button>
-      <button class="secondary-button" id="logout-button" type="button">Sair</button>
+    <nav class="sidebar-nav" aria-label="Navegação principal">
+      <p>Workspace</p>
+      <a class="nav-item active" href="#overview" data-view-link="overview" aria-current="page"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="2"/><rect x="14" y="3" width="7" height="7" rx="2"/><rect x="3" y="14" width="7" height="7" rx="2"/><rect x="14" y="14" width="7" height="7" rx="2"/></svg><span>Visão geral</span></a>
+      <a class="nav-item" href="#contents" data-view-link="contents"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5.5A1.5 1.5 0 0 1 5.5 4h13A1.5 1.5 0 0 1 20 5.5v13a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 18.5z"/><path d="m10 9 5 3-5 3z"/></svg><span>Conteúdos</span><span class="nav-count" id="sidebar-content-count">0</span></a>
+      <a class="nav-item" href="#create" data-view-link="create"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg><span>Criar conteúdo</span></a>
+      <a class="nav-item" href="#schedule" data-view-link="schedule"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M16 3v4M8 3v4M3 10h18"/></svg><span>Agenda</span></a>
+      <p>Sistema</p>
+      <button class="nav-item" id="refresh-button" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6v5h-5M18.5 15a7 7 0 1 1-1.2-8.2L20 11"/></svg><span>Atualizar dados</span></button>
     </nav>
-  </header>
 
-  <main class="shell">
-    <section class="hero" aria-labelledby="page-title">
-      <div>
-        <p class="eyebrow">Canal bíblico automatizado</p>
-        <h1 id="page-title">Transforme passagens em histórias que permanecem.</h1>
-        <p class="hero-copy">Planeje, produza e publique vídeos bíblicos com uma operação clara e sob seu controle.</p>
-      </div>
-      <div class="hero-status" aria-label="Estado da operação">
-        <span>Operação</span>
-        <strong id="system-status">Carregando</strong>
-        <small id="last-updated">Aguardando dados</small>
-      </div>
-    </section>
+    <div class="sidebar-foot">
+      <div class="system-chip"><i aria-hidden="true"></i><span><strong id="system-status">Verificando</strong><small id="uptime">Conectando</small></span></div>
+      <button class="nav-item logout" id="logout-button" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 17l5-5-5-5M15 12H3M14 4h5a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-5"/></svg><span>Sair</span></button>
+    </div>
+  </aside>
+  <div class="sidebar-scrim" id="sidebar-scrim" hidden></div>
 
-    <section class="metrics" aria-label="Resumo do canal">
-      <article class="metric-card"><span>Agentes ativos</span><strong id="agent-count">0 de 7</strong><small>Pipeline conectado</small></article>
-      <article class="metric-card"><span>Conteúdos</span><strong id="content-count">0</strong><small>Produções registradas</small></article>
-      <article class="metric-card"><span>Publicados</span><strong id="published-count">0</strong><small>Vídeos no canal</small></article>
-      <article class="metric-card"><span>Próxima ação</span><strong id="next-generation">06:00</strong><small>Horário programado</small></article>
-    </section>
+  <div class="app-shell">
+    <header class="topbar">
+      <button class="menu-button" id="menu-button" type="button" aria-label="Abrir menu" aria-controls="sidebar" aria-expanded="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+      <div><p class="page-kicker" id="page-kicker">Workspace</p><h1 id="page-title">Visão geral</h1></div>
+      <button class="primary-button compact" type="button" data-view-link="create"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg><span>Novo conteúdo</span></button>
+    </header>
 
-    <section class="workspace-grid">
-      <article class="surface composer">
-        <div class="section-heading">
-          <div><p class="eyebrow">Nova produção</p><h2>Criar vídeo bíblico</h2></div>
-          <span class="section-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m12 3 1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/></svg></span>
+    <main id="main-content" tabindex="-1">
+      <section class="app-view active" data-view="overview" aria-labelledby="page-title">
+        <div class="overview-intro">
+          <div><h2>Produção em um só lugar</h2><p>Acompanhe o que está em andamento e inicie a próxima produção.</p></div>
+          <span class="updated-at" id="last-updated">Aguardando dados</span>
         </div>
-        <form id="generate-form">
-          <label for="topic">Tema ou passagem</label>
-          <textarea id="topic" name="topic" rows="3" maxlength="200" placeholder="Exemplo: A coragem de Davi diante de Golias"></textarea>
-          <div class="form-row">
-            <div>
-              <label for="style">Formato</label>
-              <select id="style" name="style">
-                <option value="story">História narrada</option>
-                <option value="educational">Estudo bíblico</option>
-                <option value="explainer">Explicação</option>
-                <option value="list">Lista temática</option>
-              </select>
+        <section class="metrics" aria-label="Resumo da operação">
+          <article class="metric-card"><span>Agentes ativos</span><strong id="agent-count">0 de 7</strong><small>Pipeline conectado</small></article>
+          <article class="metric-card"><span>Conteúdos</span><strong id="content-count">0</strong><small>Produções registradas</small></article>
+          <article class="metric-card"><span>Publicados</span><strong id="published-count">0</strong><small>Vídeos no canal</small></article>
+          <article class="metric-card"><span>Próxima ação</span><strong id="next-generation">06:00</strong><small>Horário programado</small></article>
+        </section>
+        <div class="dashboard-grid">
+          <article class="surface span-two">
+            <div class="section-heading"><div><p class="eyebrow">Produção recente</p><h2>Últimos conteúdos</h2></div><button class="text-button" type="button" data-view-link="contents">Ver todos</button></div>
+            <div id="recent-contents" class="content-list"><div class="skeleton tall"></div><div class="skeleton tall"></div></div>
+          </article>
+          <article class="surface">
+            <div class="section-heading"><div><p class="eyebrow">Agenda</p><h2>Próximas ações</h2></div></div>
+            <div id="upcoming-schedule" class="stack-list"><div class="skeleton tall"></div><div class="skeleton tall"></div></div>
+          </article>
+          <article class="surface">
+            <div class="section-heading"><div><p class="eyebrow">Pipeline</p><h2>Agentes</h2></div></div>
+            <div id="agent-status" class="agent-grid"><div class="skeleton"></div><div class="skeleton"></div></div>
+          </article>
+        </div>
+      </section>
+
+      <section class="app-view" data-view="contents" aria-labelledby="contents-title">
+        <div class="view-heading"><div><h2 id="contents-title">Conteúdos</h2><p>Todos os vídeos criados pelo sistema.</p></div><span class="result-count" id="result-count">0 itens</span></div>
+        <div class="toolbar-card">
+          <label class="search-field" for="content-search"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg><input id="content-search" type="search" placeholder="Buscar por título ou tema" autocomplete="off"></label>
+          <label class="filter-label" for="status-filter">Status<span class="sr-only"> do conteúdo</span></label>
+          <select id="status-filter"><option value="all">Todos</option><option value="processing">Em produção</option><option value="ready">Pronto</option><option value="scheduled">Agendado</option><option value="published">Publicado</option><option value="simulated">Precisa de atenção</option></select>
+        </div>
+        <div id="content-library" class="library" aria-live="polite"><div class="skeleton content-skeleton"></div><div class="skeleton content-skeleton"></div></div>
+      </section>
+
+      <section class="app-view" data-view="create" aria-labelledby="create-title">
+        <div class="view-heading"><div><h2 id="create-title">Criar conteúdo</h2><p>Defina o assunto. O sistema cuida das etapas de produção.</p></div></div>
+        <article class="surface creation-panel">
+          <form id="generate-form">
+            <label for="topic">Tema ou passagem</label>
+            <textarea id="topic" name="topic" rows="4" maxlength="200" placeholder="Exemplo: A coragem de Davi diante de Golias"></textarea>
+            <div class="form-row">
+              <div><label for="style">Formato</label><select id="style" name="style"><option value="story">História narrada</option><option value="educational">Estudo bíblico</option><option value="explainer">Explicação</option><option value="list">Lista temática</option></select></div>
+              <div><label for="length">Duração</label><select id="length" name="length"><option value="short">Curta</option><option value="medium" selected>Média</option><option value="long">Longa</option></select></div>
             </div>
-            <div>
-              <label for="length">Duração</label>
-              <select id="length" name="length">
-                <option value="short">Curta</option>
-                <option value="medium" selected>Média</option>
-                <option value="long">Longa</option>
-              </select>
-            </div>
-          </div>
-          <div id="form-message" class="form-message" role="status" aria-live="polite"></div>
-          <button class="primary-button" id="generate-button" type="submit">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 3 14 9-14 9z"/></svg>
-            <span>Iniciar produção</span>
-          </button>
-        </form>
-      </article>
+            <div class="creation-summary"><span>O fluxo inclui roteiro, narração, imagens, montagem e preparação para publicação.</span></div>
+            <div id="form-message" class="form-message" role="status" aria-live="polite"></div>
+            <button class="primary-button" id="generate-button" type="submit"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 3 14 9-14 9z"/></svg><span>Iniciar produção</span></button>
+          </form>
+        </article>
+      </section>
 
-      <article class="surface">
-        <div class="section-heading"><div><p class="eyebrow">Agenda</p><h2>Próximas publicações</h2></div></div>
-        <div id="upcoming-schedule" class="stack-list" aria-live="polite"><div class="skeleton tall"></div><div class="skeleton tall"></div></div>
-      </article>
-
-      <article class="surface span-two">
-        <div class="section-heading"><div><p class="eyebrow">Pipeline</p><h2>Agentes de produção</h2></div><span class="quiet-note" id="uptime">Inicializando</span></div>
-        <div id="agent-status" class="agent-grid"><div class="skeleton"></div><div class="skeleton"></div><div class="skeleton"></div></div>
-      </article>
-
-      <article class="surface">
-        <div class="section-heading"><div><p class="eyebrow">Direção editorial</p><h2>Identidade do conteúdo</h2></div></div>
-        <dl class="detail-list">
-          <div><dt>Foco</dt><dd>Histórias e ensinamentos bíblicos</dd></div>
-          <div><dt>Público</dt><dd>Pessoas em busca de fé e reflexão</dd></div>
-          <div><dt>Privacidade</dt><dd>Revisão privada antes de publicar</dd></div>
-          <div><dt>Frequência</dt><dd>Programação diária</dd></div>
-        </dl>
-      </article>
-
-      <article class="surface">
-        <div class="section-heading"><div><p class="eyebrow">Desempenho</p><h2>Visão geral</h2></div></div>
-        <div id="performance-metrics" class="detail-list"><div class="skeleton tall"></div><div class="skeleton tall"></div></div>
-      </article>
-    </section>
-  </main>
+      <section class="app-view" data-view="schedule" aria-labelledby="schedule-title">
+        <div class="view-heading"><div><h2 id="schedule-title">Agenda</h2><p>Publicações programadas e rotinas automáticas.</p></div></div>
+        <article class="surface"><div id="full-schedule" class="schedule-board"><div class="skeleton tall"></div></div></article>
+      </section>
+    </main>
+  </div>
   <script src="/app.js" defer></script>
 </body>
 </html>
