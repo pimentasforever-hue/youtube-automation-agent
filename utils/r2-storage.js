@@ -19,9 +19,32 @@ class R2Storage {
 
   async upload(filePath, key, contentType) {
     if (!this.enabled || !filePath) return null;
+    await this.validateUploadFile(filePath, contentType);
     const response = await this.client.send(new PutObjectCommand({ Bucket: this.bucket, Key: key, Body: fs.createReadStream(filePath), ContentType: contentType }));
     this.logger?.info(`R2 object stored: ${key}`);
     return { key, url: this.publicUrl ? `${this.publicUrl}/${key}` : null, etag: response.ETag || null };
+  }
+
+  async validateUploadFile(filePath, contentType) {
+    const stats = await fs.promises.stat(filePath);
+    if (!stats.isFile() || stats.size === 0) {
+      throw new Error(`Upload bloqueado: ${path.basename(filePath)} está vazio.`);
+    }
+    if (!String(contentType || '').startsWith('image/')) return true;
+
+    const handle = await fs.promises.open(filePath, 'r');
+    try {
+      const header = Buffer.alloc(8);
+      await handle.read(header, 0, header.length, 0);
+      const isPng = header.equals(Buffer.from('89504e470d0a1a0a', 'hex'));
+      const isJpeg = header.subarray(0, 3).equals(Buffer.from('ffd8ff', 'hex'));
+      if ((contentType === 'image/png' && !isPng) || (contentType === 'image/jpeg' && !isJpeg)) {
+        throw new Error(`Upload bloqueado: ${path.basename(filePath)} não contém uma imagem ${contentType === 'image/png' ? 'PNG' : 'JPEG'} válida.`);
+      }
+    } finally {
+      await handle.close();
+    }
+    return true;
   }
 
   async writeJSON(key, data) {

@@ -844,7 +844,7 @@ class AIVideoGenerator {
     this.logger.info('Generating custom thumbnail...');
 
     try {
-      if (!this.openai && !this.gemini) {
+      if (!this.hasConfiguredImageProvider()) {
         return await this.simulateThumbnailGeneration(script, style);
       }
 
@@ -860,7 +860,7 @@ class AIVideoGenerator {
       };
     } catch (error) {
       this.logger.error('Thumbnail generation failed:', error);
-      return await this.simulateThumbnailGeneration(script, style);
+      throw new Error(this.formatImageGenerationError(error));
     }
   }
 

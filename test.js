@@ -518,6 +518,9 @@ class SystemTest {
 
   async testCloudflareImageProvider() {
     const { AIVideoGenerator } = require('./utils/ai-video-generator');
+    const { R2Storage } = require('./utils/r2-storage');
+    const fs = require('fs').promises;
+    const os = require('os');
     const envKeys = ['OPENAI_API_KEY', 'GEMINI_API_KEY', 'CLOUDFLARE_ACCOUNT_ID', 'CLOUDFLARE_AI_API_TOKEN', 'IMAGE_PROVIDER', 'R2_ACCOUNT_ID'];
     const savedEnv = {};
     for (const key of envKeys) {
@@ -547,6 +550,34 @@ class SystemTest {
       const authError = generator.formatCloudflareImageError({ response: { status: 403 } });
       if (!/permissão/i.test(authError)) {
         throw new Error('Cloudflare permission error was not simplified');
+      }
+
+      const generatedPaths = [];
+      generator.generateImage = async (_prompt, imagePath) => {
+        await fs.mkdir(path.dirname(imagePath), { recursive: true });
+        await fs.writeFile(imagePath, Buffer.from('89504e470d0a1a0a00000000', 'hex'));
+        generatedPaths.push(imagePath);
+        return imagePath;
+      };
+      const thumbnail = await generator.generateThumbnail({ title: 'Teste de miniatura' });
+      if (thumbnail.simulated || generatedPaths.length !== 1) {
+        throw new Error('Cloudflare thumbnail generation fell back to a simulated file');
+      }
+
+      const invalidImagePath = path.join(os.tmpdir(), `invalid-thumbnail-${Date.now()}.png`);
+      await fs.writeFile(invalidImagePath, JSON.stringify({ message: 'not an image' }));
+      const storage = new R2Storage();
+      let invalidImageRejected = false;
+      try {
+        await storage.validateUploadFile(invalidImagePath, 'image/png');
+      } catch (error) {
+        invalidImageRejected = /PNG válida/i.test(error.message);
+      } finally {
+        await fs.unlink(invalidImagePath).catch(() => {});
+        await Promise.all(generatedPaths.map(file => fs.unlink(file).catch(() => {})));
+      }
+      if (!invalidImageRejected) {
+        throw new Error('R2 accepted JSON disguised as a PNG image');
       }
     } finally {
       for (const key of envKeys) {

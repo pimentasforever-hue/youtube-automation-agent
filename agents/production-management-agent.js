@@ -93,7 +93,7 @@ class ProductionManagementAgent {
       // Save to database
       await this.db.saveProductionData(productionData);
 
-      if (this.storage.enabled && productionData.assets.thumbnail?.path && await fs.access(productionData.assets.thumbnail.path).then(() => true).catch(() => false)) {
+      if (this.storage.enabled && !productionData.assets.thumbnail?.simulated && productionData.assets.thumbnail?.path && await fs.access(productionData.assets.thumbnail.path).then(() => true).catch(() => false)) {
         const uploadedThumbnail = await this.storage.upload(productionData.assets.thumbnail.path, `productions/${productionId}/thumbnail.png`, 'image/png');
         productionData.assets.thumbnail = { ...productionData.assets.thumbnail, ...uploadedThumbnail };
         onProgress('thumbnail-storage', 64, 'Miniatura enviada para o Cloudflare R2', { objectKey: uploadedThumbnail.key, asset: 'thumbnail' });
@@ -253,7 +253,8 @@ class ProductionManagementAgent {
         originalPath: thumbnail.path,
         dimensions: aiThumbnail.dimensions,
         fileSize: aiThumbnail.fileSize,
-        generatedWith: 'AI'
+        generatedWith: aiThumbnail.simulated ? 'Simulação' : 'AI',
+        simulated: Boolean(aiThumbnail.simulated)
       };
     } catch (error) {
       this.logger.error('AI thumbnail generation failed:', error);
@@ -276,7 +277,8 @@ class ProductionManagementAgent {
         path: productionThumbnailPath,
         originalPath: thumbnail.path,
         dimensions: thumbnail.dimensions || { width: 1792, height: 1024 },
-        fileSize: thumbnail.fileSize || 0
+        fileSize: thumbnail.fileSize || 0,
+        simulated: !thumbnail.path
       };
     }
   }
