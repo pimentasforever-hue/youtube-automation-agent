@@ -190,6 +190,15 @@ class Database {
         data TEXT,
         created_at TEXT DEFAULT CURRENT_TIMESTAMP
       )`,
+      `CREATE TABLE IF NOT EXISTS production_jobs (
+        id TEXT PRIMARY KEY,
+        stage TEXT NOT NULL,
+        progress INTEGER NOT NULL DEFAULT 0,
+        message TEXT NOT NULL,
+        result TEXT,
+        started_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      )`,
       `CREATE TABLE IF NOT EXISTS users (
         id TEXT PRIMARY KEY,
         username TEXT NOT NULL UNIQUE,
@@ -652,6 +661,30 @@ class Database {
 
   async updateUserCredentials(id, username, passwordHash) {
     await this.executeQuery('UPDATE users SET username = ?, password_hash = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [username, passwordHash, id]);
+  }
+
+  async saveProductionJob(job) {
+    const sql = this.isPostgres
+      ? `INSERT INTO production_jobs (id, stage, progress, message, result, started_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT (id) DO UPDATE SET stage = EXCLUDED.stage, progress = EXCLUDED.progress,
+         message = EXCLUDED.message, result = EXCLUDED.result, updated_at = EXCLUDED.updated_at`
+      : `INSERT OR REPLACE INTO production_jobs (id, stage, progress, message, result, started_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`;
+    await this.executeQuery(sql, [job.id, job.stage, job.progress, job.message, job.result ? JSON.stringify(job.result) : null, job.startedAt, job.updatedAt]);
+  }
+
+  async getProductionJobs(limit = 20) {
+    const rows = await this.getAllRows('SELECT * FROM production_jobs ORDER BY updated_at DESC LIMIT ?', [limit]);
+    return rows.map((row) => ({
+      id: row.id,
+      stage: row.stage,
+      progress: Number(row.progress),
+      message: row.message,
+      result: row.result ? JSON.parse(row.result) : null,
+      startedAt: row.started_at,
+      updatedAt: row.updated_at
+    }));
   }
 
   postgresQuery(query) {

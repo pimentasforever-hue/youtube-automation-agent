@@ -149,13 +149,34 @@ function updateConnections(data) {
 }
 
 function updateJobs(jobs) {
+  const latest = (jobs || [])[0];
   const active = (jobs || []).find((job) => !['completed', 'failed'].includes(job.stage));
   $('production-panel').hidden = !active;
-  if (!active) return;
-  $('production-stage').textContent = active.message;
-  $('production-message').textContent = `Etapa atual: ${active.stage}`;
-  $('production-percent').textContent = `${active.progress}%`;
-  $('production-progress').style.width = `${active.progress}%`;
+  if (active) {
+    $('production-stage').textContent = active.message;
+    $('production-message').textContent = `Etapa atual: ${active.stage}`;
+    $('production-percent').textContent = `${active.progress}%`;
+    $('production-progress').style.width = `${active.progress}%`;
+  }
+
+  let dock = $('global-production-status');
+  if (!dock) {
+    document.body.insertAdjacentHTML('beforeend', '<button id="global-production-status" class="production-dock" type="button" hidden><span class="production-dock-label">Produção</span><strong></strong><span class="production-dock-meta"></span><span class="production-dock-track"><i></i></span></button>');
+    dock = $('global-production-status');
+    dock.addEventListener('click', () => showView('overview'));
+  }
+  if (!latest) {
+    dock.hidden = true;
+    return;
+  }
+  const finishedRecently = ['completed', 'failed'].includes(latest.stage) && Date.now() - new Date(latest.updatedAt).getTime() < 15 * 60 * 1000;
+  dock.hidden = !active && !finishedRecently;
+  const shown = active || latest;
+  dock.classList.toggle('failed', shown.stage === 'failed');
+  dock.classList.toggle('completed', shown.stage === 'completed');
+  dock.querySelector('strong').textContent = shown.message;
+  dock.querySelector('.production-dock-meta').textContent = `${shown.progress}% · ${shown.stage === 'completed' ? 'Concluído' : shown.stage === 'failed' ? 'Falhou' : 'Em andamento'}`;
+  dock.querySelector('.production-dock-track i').style.width = `${shown.progress}%`;
 }
 
 async function loadJobs() {

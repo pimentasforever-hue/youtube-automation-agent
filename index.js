@@ -464,11 +464,18 @@ class YouTubeAutomationAgent {
       }
     });
 
-    this.app.get('/production-status', this.requireAuth(), (_req, res) => {
-      const jobs = Array.from(this.productionJobs.values())
-        .sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt))
-        .slice(0, 20);
-      res.json(jobs);
+    this.app.get('/production-status', this.requireAuth(), async (_req, res) => {
+      try {
+        const persisted = await this.db.getProductionJobs(20);
+        const merged = new Map(persisted.map((job) => [job.id, job]));
+        for (const job of this.productionJobs.values()) merged.set(job.id, job);
+        const jobs = Array.from(merged.values())
+          .sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt))
+          .slice(0, 20);
+        res.json(jobs);
+      } catch (error) {
+        res.status(500).json({ error: error.message });
+      }
     });
 
     // Get analytics
@@ -577,7 +584,9 @@ class YouTubeAutomationAgent {
 
   updateProductionJob(id, stage, progress, message, result = null) {
     const existing = this.productionJobs.get(id) || { id, startedAt: new Date().toISOString() };
-    this.productionJobs.set(id, { ...existing, stage, progress, message, result, updatedAt: new Date().toISOString() });
+    const job = { ...existing, stage, progress, message, result, updatedAt: new Date().toISOString() };
+    this.productionJobs.set(id, job);
+    this.db.saveProductionJob(job).catch((error) => this.logger.warn(`Could not persist production job ${id}: ${error.message}`));
   }
 
   async generateContent(topic = null, style = null, length = 'medium', options = {}, jobId = null) {
