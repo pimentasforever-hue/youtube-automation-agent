@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>Entrar | Ecos da Escritura</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body class="login-page">
+  <div class="ambient ambient-one" aria-hidden="true"></div>
+  <div class="ambient ambient-two" aria-hidden="true"></div>
+  <main class="login-shell">
+    <section class="login-intro">
+      <span class="brand-mark large" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 4.75A2.75 2.75 0 0 1 7.75 2H20v17H7.75A2.75 2.75 0 0 0 5 21.75z"/><path d="M5 4.75v17M9 6h7M9 10h7"/></svg></span>
+      <p class="eyebrow">Ecos da Escritura</p>
+      <h1>Seu estúdio bíblico, protegido.</h1>
+      <p>Entre para acompanhar a produção, revisar a agenda e criar novos vídeos.</p>
+    </section>
+    <section class="login-card" aria-labelledby="login-title">
+      <div><p class="eyebrow">Acesso restrito</p><h2 id="login-title">Entrar no painel</h2></div>
+      <form id="login-form">
+        <label for="username">Usuário</label>
+        <input id="username" name="username" type="text" autocomplete="username" required autofocus>
+        <label for="password">Senha</label>
+        <div class="password-field">
+          <input id="password" name="password" type="password" autocomplete="current-password" required>
+          <button id="password-toggle" type="button" aria-label="Mostrar senha">Mostrar</button>
+        </div>
+        <div id="login-message" class="form-message" role="status" aria-live="polite"></div>
+        <button class="primary-button full" id="login-button" type="submit"><span>Entrar</span></button>
+      </form>
+      <p class="privacy-note">A sessão expira automaticamente após 12 horas.</p>
+    </section>
+  </main>
+  <script src="/login.js" defer></script>
+</body>
+</html>

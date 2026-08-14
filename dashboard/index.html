@@ -1,447 +1,115 @@
-<!DOCTYPE html>
-<html lang="en">
+<!doctype html>
+<html lang="pt-BR">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Ethereal Dreamscript - YouTube Automation Dashboard</title>
-    <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-        
-        body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: #333;
-            min-height: 100vh;
-        }
-        
-        .container {
-            max-width: 1200px;
-            margin: 0 auto;
-            padding: 20px;
-        }
-        
-        .header {
-            text-align: center;
-            color: white;
-            margin-bottom: 30px;
-        }
-        
-        .header h1 {
-            font-size: 2.5em;
-            margin-bottom: 10px;
-        }
-        
-        .header p {
-            font-size: 1.2em;
-            opacity: 0.9;
-        }
-        
-        .status-bar {
-            background: rgba(255, 255, 255, 0.95);
-            padding: 20px;
-            border-radius: 15px;
-            margin-bottom: 30px;
-            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
-        }
-        
-        .status-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 20px;
-            margin-bottom: 20px;
-        }
-        
-        .status-card {
-            text-align: center;
-            padding: 15px;
-            background: linear-gradient(45deg, #f093fb 0%, #f5576c 100%);
-            border-radius: 10px;
-            color: white;
-        }
-        
-        .status-card h3 {
-            font-size: 2em;
-            margin-bottom: 5px;
-        }
-        
-        .status-card p {
-            opacity: 0.9;
-        }
-        
-        .dashboard-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
-            gap: 20px;
-        }
-        
-        .dashboard-card {
-            background: rgba(255, 255, 255, 0.95);
-            padding: 25px;
-            border-radius: 15px;
-            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
-        }
-        
-        .dashboard-card h2 {
-            color: #667eea;
-            margin-bottom: 15px;
-            display: flex;
-            align-items: center;
-            gap: 10px;
-        }
-        
-        .card-content {
-            line-height: 1.6;
-        }
-        
-        .loading {
-            text-align: center;
-            color: #666;
-            font-style: italic;
-        }
-        
-        .btn {
-            background: linear-gradient(45deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            padding: 10px 20px;
-            border: none;
-            border-radius: 5px;
-            cursor: pointer;
-            margin: 5px;
-            transition: transform 0.2s;
-        }
-        
-        .btn:hover {
-            transform: translateY(-2px);
-        }
-        
-        .schedule-item {
-            background: #f8f9ff;
-            padding: 10px;
-            margin: 10px 0;
-            border-radius: 5px;
-            border-left: 4px solid #667eea;
-        }
-        
-        .log-entry {
-            font-family: 'Courier New', monospace;
-            font-size: 0.9em;
-            padding: 5px;
-            margin: 2px 0;
-            background: #f5f5f5;
-            border-radius: 3px;
-        }
-        
-        .success { color: #28a745; }
-        .warning { color: #ffc107; }
-        .error { color: #dc3545; }
-        .info { color: #17a2b8; }
-        
-        .refresh-btn {
-            position: fixed;
-            bottom: 20px;
-            right: 20px;
-            width: 60px;
-            height: 60px;
-            border-radius: 50%;
-            background: linear-gradient(45deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            border: none;
-            font-size: 1.5em;
-            cursor: pointer;
-            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
-            transition: transform 0.2s;
-        }
-        
-        .refresh-btn:hover {
-            transform: scale(1.1);
-        }
-    </style>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>Ecos da Escritura</title>
+  <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
-    <div class="container">
-        <div class="header">
-            <h1>🎬 Ethereal Dreamscript</h1>
-            <p>YouTube Automation Dashboard</p>
+  <div class="ambient ambient-one" aria-hidden="true"></div>
+  <div class="ambient ambient-two" aria-hidden="true"></div>
+
+  <header class="glass-bar">
+    <a class="brand" href="/" aria-label="Ecos da Escritura, início">
+      <span class="brand-mark" aria-hidden="true">
+        <svg viewBox="0 0 24 24"><path d="M5 4.75A2.75 2.75 0 0 1 7.75 2H20v17H7.75A2.75 2.75 0 0 0 5 21.75z"/><path d="M5 4.75v17M9 6h7M9 10h7"/></svg>
+      </span>
+      <span><strong>Ecos da Escritura</strong><small>Estúdio de conteúdo</small></span>
+    </a>
+    <nav class="nav-actions" aria-label="Ações da conta">
+      <span class="live-indicator"><i></i><span id="header-status">Verificando</span></span>
+      <button class="icon-button" id="refresh-button" type="button" aria-label="Atualizar painel">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6v5h-5"/><path d="M18.5 15a7 7 0 1 1-1.2-8.2L20 11"/></svg>
+      </button>
+      <button class="secondary-button" id="logout-button" type="button">Sair</button>
+    </nav>
+  </header>
+
+  <main class="shell">
+    <section class="hero" aria-labelledby="page-title">
+      <div>
+        <p class="eyebrow">Canal bíblico automatizado</p>
+        <h1 id="page-title">Transforme passagens em histórias que permanecem.</h1>
+        <p class="hero-copy">Planeje, produza e publique vídeos bíblicos com uma operação clara e sob seu controle.</p>
+      </div>
+      <div class="hero-status" aria-label="Estado da operação">
+        <span>Operação</span>
+        <strong id="system-status">Carregando</strong>
+        <small id="last-updated">Aguardando dados</small>
+      </div>
+    </section>
+
+    <section class="metrics" aria-label="Resumo do canal">
+      <article class="metric-card"><span>Agentes ativos</span><strong id="agent-count">0 de 7</strong><small>Pipeline conectado</small></article>
+      <article class="metric-card"><span>Conteúdos</span><strong id="content-count">0</strong><small>Produções registradas</small></article>
+      <article class="metric-card"><span>Publicados</span><strong id="published-count">0</strong><small>Vídeos no canal</small></article>
+      <article class="metric-card"><span>Próxima ação</span><strong id="next-generation">06:00</strong><small>Horário programado</small></article>
+    </section>
+
+    <section class="workspace-grid">
+      <article class="surface composer">
+        <div class="section-heading">
+          <div><p class="eyebrow">Nova produção</p><h2>Criar vídeo bíblico</h2></div>
+          <span class="section-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m12 3 1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/></svg></span>
         </div>
-        
-        <div class="status-bar">
-            <div class="status-grid">
-                <div class="status-card">
-                    <h3 id="system-status">🟢</h3>
-                    <p>System Status</p>
-                </div>
-                <div class="status-card">
-                    <h3 id="content-count">-</h3>
-                    <p>Content Generated</p>
-                </div>
-                <div class="status-card">
-                    <h3 id="published-count">-</h3>
-                    <p>Videos Published</p>
-                </div>
-                <div class="status-card">
-                    <h3 id="next-generation">-</h3>
-                    <p>Next Generation</p>
-                </div>
+        <form id="generate-form">
+          <label for="topic">Tema ou passagem</label>
+          <textarea id="topic" name="topic" rows="3" maxlength="200" placeholder="Exemplo: A coragem de Davi diante de Golias"></textarea>
+          <div class="form-row">
+            <div>
+              <label for="style">Formato</label>
+              <select id="style" name="style">
+                <option value="story">História narrada</option>
+                <option value="educational">Estudo bíblico</option>
+                <option value="explainer">Explicação</option>
+                <option value="list">Lista temática</option>
+              </select>
             </div>
-            <div style="text-align: center;">
-                <button class="btn" onclick="generateContent()">🎬 Generate Content Now</button>
-                <button class="btn" onclick="viewAnalytics()">📊 View Analytics</button>
-                <button class="btn" onclick="viewSchedule()">📅 View Schedule</button>
+            <div>
+              <label for="length">Duração</label>
+              <select id="length" name="length">
+                <option value="short">Curta</option>
+                <option value="medium" selected>Média</option>
+                <option value="long">Longa</option>
+              </select>
             </div>
-        </div>
-        
-        <div class="dashboard-grid">
-            <div class="dashboard-card">
-                <h2>📈 System Overview</h2>
-                <div class="card-content">
-                    <div id="system-overview" class="loading">Loading system status...</div>
-                </div>
-            </div>
-            
-            <div class="dashboard-card">
-                <h2>📅 Upcoming Schedule</h2>
-                <div class="card-content">
-                    <div id="upcoming-schedule" class="loading">Loading schedule...</div>
-                </div>
-            </div>
-            
-            <div class="dashboard-card">
-                <h2>🎯 Content Strategy</h2>
-                <div class="card-content">
-                    <div id="content-strategy">
-                        <p><strong>Current Focus:</strong> Animated Storytelling</p>
-                        <p><strong>Target Audience:</strong> Creative individuals interested in storytelling and imagination</p>
-                        <p><strong>Content Types:</strong> Story-driven content, Explainers, Tutorials</p>
-                        <p><strong>Posting Frequency:</strong> Daily</p>
-                        <p><strong>Optimal Time:</strong> 2:00 PM</p>
-                    </div>
-                </div>
-            </div>
-            
-            <div class="dashboard-card">
-                <h2>📊 Recent Activity</h2>
-                <div class="card-content">
-                    <div id="recent-activity" class="loading">Loading activity...</div>
-                </div>
-            </div>
-            
-            <div class="dashboard-card">
-                <h2>🤖 Agent Status</h2>
-                <div class="card-content">
-                    <div id="agent-status" class="loading">Loading agent status...</div>
-                </div>
-            </div>
-            
-            <div class="dashboard-card">
-                <h2>📈 Performance Metrics</h2>
-                <div class="card-content">
-                    <div id="performance-metrics" class="loading">Loading metrics...</div>
-                </div>
-            </div>
-        </div>
-    </div>
-    
-    <button class="refresh-btn" onclick="refreshDashboard()" title="Refresh Dashboard">
-        🔄
-    </button>
-    
-    <script>
-        // Dashboard functionality
-        async function loadDashboard() {
-            try {
-                // Load system health
-                const healthResponse = await fetch('/health');
-                const healthData = await healthResponse.json();
-                updateSystemStatus(healthData);
-                
-                // Load schedule
-                const scheduleResponse = await fetch('/schedule');
-                const scheduleData = await scheduleResponse.json();
-                updateSchedule(scheduleData);
-                
-                // Load analytics
-                try {
-                    const analyticsResponse = await fetch('/analytics');
-                    const analyticsData = await analyticsResponse.json();
-                    updateMetrics(analyticsData);
-                } catch (error) {
-                    console.log('Analytics not available yet');
-                }
-                
-            } catch (error) {
-                console.error('Dashboard load error:', error);
-                document.getElementById('system-status').textContent = '🔴';
-            }
-        }
-        
-        function updateSystemStatus(data) {
-            document.getElementById('system-status').textContent = data.status === 'healthy' ? '🟢' : '🔴';
-            
-            const overview = document.getElementById('system-overview');
-            overview.innerHTML = `
-                <p><strong>Status:</strong> ${data.initialized ? 'Initialized' : 'Initializing'}</p>
-                <p><strong>Agents Active:</strong> ${data.agents ? data.agents.length : 0}/7</p>
-                <p><strong>Uptime:</strong> ${formatUptime(data.uptime || 0)}</p>
-                <p><strong>Last Updated:</strong> ${new Date().toLocaleTimeString()}</p>
-            `;
-            
-            const agentStatus = document.getElementById('agent-status');
-            if (data.agents) {
-                agentStatus.innerHTML = data.agents.map(agent => 
-                    `<div class="schedule-item">✅ ${agent} Agent</div>`
-                ).join('');
-            }
-        }
-        
-        function updateSchedule(data) {
-            const schedule = document.getElementById('upcoming-schedule');
-            
-            if (data && data.length > 0) {
-                schedule.innerHTML = data.slice(0, 3).map(item => `
-                    <div class="schedule-item">
-                        <strong>${item.title || 'Content Generation'}</strong><br>
-                        <small>${new Date(item.publishTime || item.scheduledTime).toLocaleString()}</small>
-                    </div>
-                `).join('');
-                
-                // Update next generation time
-                const nextItem = data[0];
-                if (nextItem) {
-                    const nextTime = new Date(nextItem.publishTime || nextItem.scheduledTime);
-                    document.getElementById('next-generation').textContent = 
-                        nextTime.toLocaleDateString() === new Date().toLocaleDateString() 
-                            ? nextTime.toLocaleTimeString() 
-                            : 'Tomorrow';
-                }
-            } else {
-                schedule.innerHTML = `
-                    <div class="schedule-item">
-                        <strong>📅 Daily Content Generation</strong><br>
-                        <small>Scheduled for 6:00 AM daily</small>
-                    </div>
-                    <div class="schedule-item">
-                        <strong>📊 Analytics Collection</strong><br>
-                        <small>Scheduled for 9:00 AM daily</small>
-                    </div>
-                    <div class="schedule-item">
-                        <strong>🔧 Optimization Tasks</strong><br>
-                        <small>Scheduled for 10:00 PM daily</small>
-                    </div>
-                `;
-                document.getElementById('next-generation').textContent = '6:00 AM';
-            }
-        }
-        
-        function updateMetrics(data) {
-            const metrics = document.getElementById('performance-metrics');
-            if (data && data.totalVideos !== undefined) {
-                document.getElementById('content-count').textContent = data.totalVideos || '0';
-                document.getElementById('published-count').textContent = data.totalVideos || '0';
-                
-                metrics.innerHTML = `
-                    <p><strong>Average Performance:</strong> ${data.averagePerformanceScore || 'N/A'}</p>
-                    <p><strong>Total Content:</strong> ${data.totalVideos || 0}</p>
-                    <p><strong>System Health:</strong> Excellent</p>
-                `;
-            } else {
-                metrics.innerHTML = `
-                    <p><strong>Status:</strong> System just started</p>
-                    <p><strong>First Content:</strong> Will generate within 24 hours</p>
-                    <p><strong>Automation:</strong> Active and ready</p>
-                `;
-            }
-            
-            // Update activity log
-            const activity = document.getElementById('recent-activity');
-            activity.innerHTML = `
-                <div class="log-entry success">✅ System initialized successfully</div>
-                <div class="log-entry info">ℹ️ All 7 agents are active</div>
-                <div class="log-entry info">ℹ️ Content strategy loaded</div>
-                <div class="log-entry info">ℹ️ Automation scheduler started</div>
-                <div class="log-entry success">✅ Ready for content generation</div>
-            `;
-        }
-        
-        function formatUptime(seconds) {
-            const hours = Math.floor(seconds / 3600);
-            const minutes = Math.floor((seconds % 3600) / 60);
-            return `${hours}h ${minutes}m`;
-        }
-        
-        // API key handling for protected endpoints (API_KEY in .env)
-        function getStoredApiKey() {
-            return localStorage.getItem('yaa_api_key') || '';
-        }
+          </div>
+          <div id="form-message" class="form-message" role="status" aria-live="polite"></div>
+          <button class="primary-button" id="generate-button" type="submit">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 3 14 9-14 9z"/></svg>
+            <span>Iniciar produção</span>
+          </button>
+        </form>
+      </article>
 
-        function promptForApiKey() {
-            const key = prompt('This server requires an API key (the API_KEY value from your .env):', getStoredApiKey());
-            if (key === null) return null; // user cancelled
-            localStorage.setItem('yaa_api_key', key.trim());
-            return key.trim();
-        }
+      <article class="surface">
+        <div class="section-heading"><div><p class="eyebrow">Agenda</p><h2>Próximas publicações</h2></div></div>
+        <div id="upcoming-schedule" class="stack-list" aria-live="polite"><div class="skeleton tall"></div><div class="skeleton tall"></div></div>
+      </article>
 
-        async function postWithApiKey(url, body) {
-            const doFetch = (key) => fetch(url, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    ...(key ? { 'x-api-key': key } : {})
-                },
-                body: JSON.stringify(body)
-            });
+      <article class="surface span-two">
+        <div class="section-heading"><div><p class="eyebrow">Pipeline</p><h2>Agentes de produção</h2></div><span class="quiet-note" id="uptime">Inicializando</span></div>
+        <div id="agent-status" class="agent-grid"><div class="skeleton"></div><div class="skeleton"></div><div class="skeleton"></div></div>
+      </article>
 
-            let response = await doFetch(getStoredApiKey());
-            if (response.status === 401) {
-                const key = promptForApiKey();
-                if (key !== null) {
-                    response = await doFetch(key);
-                }
-            }
-            return response;
-        }
+      <article class="surface">
+        <div class="section-heading"><div><p class="eyebrow">Direção editorial</p><h2>Identidade do conteúdo</h2></div></div>
+        <dl class="detail-list">
+          <div><dt>Foco</dt><dd>Histórias e ensinamentos bíblicos</dd></div>
+          <div><dt>Público</dt><dd>Pessoas em busca de fé e reflexão</dd></div>
+          <div><dt>Privacidade</dt><dd>Revisão privada antes de publicar</dd></div>
+          <div><dt>Frequência</dt><dd>Programação diária</dd></div>
+        </dl>
+      </article>
 
-        async function generateContent() {
-            if (!confirm('Generate content now? This will create a new video for your channel.')) {
-                return;
-            }
-
-            try {
-                const response = await postWithApiKey('/generate', { topic: null, style: 'story' });
-                const result = await response.json().catch(() => ({}));
-
-                if (!response.ok) {
-                    alert(`Content generation failed: ${result.error || response.statusText}`);
-                    return;
-                }
-
-                alert(`Content generation started! Title: ${result.result?.title || 'New Content'}`);
-                refreshDashboard();
-            } catch (error) {
-                alert('Content generation failed. Please try again.');
-            }
-        }
-        
-        function viewAnalytics() {
-            window.open('/analytics', '_blank');
-        }
-        
-        function viewSchedule() {
-            window.open('/schedule', '_blank');
-        }
-        
-        function refreshDashboard() {
-            loadDashboard();
-        }
-        
-        // Auto-refresh every 30 seconds
-        setInterval(refreshDashboard, 30000);
-        
-        // Load dashboard on page load
-        loadDashboard();
-    </script>
+      <article class="surface">
+        <div class="section-heading"><div><p class="eyebrow">Desempenho</p><h2>Visão geral</h2></div></div>
+        <div id="performance-metrics" class="detail-list"><div class="skeleton tall"></div><div class="skeleton tall"></div></div>
+      </article>
+    </section>
+  </main>
+  <script src="/app.js" defer></script>
 </body>
 </html>

@@ -3,6 +3,7 @@ const { Logger } = require('./utils/logger');
 const { CredentialManager } = require('./utils/credential-manager');
 const chalk = require('chalk');
 const path = require('path');
+const crypto = require('crypto');
 
 class SystemTest {
   constructor() {
@@ -157,6 +158,9 @@ class SystemTest {
     if (typeof agent.requireAPIKey !== 'function') {
       throw new Error('requireAPIKey is not implemented');
     }
+    if (typeof agent.requireAuth !== 'function' || typeof agent.verifyPassword !== 'function') {
+      throw new Error('Username and password authentication is not implemented');
+    }
 
     const valid = agent.validateGenerateRequestBody({
       topic: 'Node automation',
@@ -230,6 +234,27 @@ class SystemTest {
     } else {
       process.env.API_KEY = previousKey;
     }
+
+    const previousSessionSecret = process.env.SESSION_SECRET;
+    const previousPasswordHash = process.env.AUTH_PASSWORD_HASH;
+    process.env.SESSION_SECRET = 'test-session-secret-with-sufficient-entropy';
+    const salt = 'test-salt-for-password-auth';
+    const password = 'test-password';
+    process.env.AUTH_PASSWORD_HASH = `${salt}:${crypto.pbkdf2Sync(password, salt, 210000, 32, 'sha256').toString('hex')}`;
+
+    if (!agent.verifyPassword(password) || agent.verifyPassword('wrong-password')) {
+      throw new Error('Password verification did not behave as expected');
+    }
+
+    const session = agent.verifySessionToken(agent.createSessionToken('test-user'));
+    if (!session || session.username !== 'test-user') {
+      throw new Error('Signed login session could not be verified');
+    }
+
+    if (previousSessionSecret === undefined) delete process.env.SESSION_SECRET;
+    else process.env.SESSION_SECRET = previousSessionSecret;
+    if (previousPasswordHash === undefined) delete process.env.AUTH_PASSWORD_HASH;
+    else process.env.AUTH_PASSWORD_HASH = previousPasswordHash;
 
     this.logger.info('API validation and security test completed successfully');
   }

@@ -2,6 +2,7 @@ require('dotenv').config();
 
 const express = require('express');
 const path = require('path');
+const crypto = require('crypto');
 const { Logger } = require('./utils/logger');
 const { Database } = require('./database/db');
 const { CredentialManager } = require('./utils/credential-manager');
@@ -24,6 +25,7 @@ class YouTubeAutomationAgent {
     this.agents = {};
     this.app = express();
     this.isInitialized = false;
+    this.loginAttempts = new Map();
   }
 
   async initialize() {
@@ -143,6 +145,73 @@ class YouTubeAutomationAgent {
     };
   }
 
+  parseCookies(header = '') {
+    return header.split(';').reduce((cookies, part) => {
+      const separator = part.indexOf('=');
+      if (separator < 0) return cookies;
+      const key = part.slice(0, separator).trim();
+      const value = part.slice(separator + 1).trim();
+      if (key) cookies[key] = decodeURIComponent(value);
+      return cookies;
+    }, {});
+  }
+
+  createSessionToken(username) {
+    const expiresAt = Date.now() + (12 * 60 * 60 * 1000);
+    const payload = Buffer.from(JSON.stringify({ username, expiresAt })).toString('base64url');
+    const signature = crypto
+      .createHmac('sha256', process.env.SESSION_SECRET)
+      .update(payload)
+      .digest('base64url');
+    return `${payload}.${signature}`;
+  }
+
+  verifySessionToken(token = '') {
+    if (!process.env.SESSION_SECRET || !token.includes('.')) return null;
+    const [payload, signature] = token.split('.');
+    const expected = crypto
+      .createHmac('sha256', process.env.SESSION_SECRET)
+      .update(payload)
+      .digest('base64url');
+    const actualBuffer = Buffer.from(signature);
+    const expectedBuffer = Buffer.from(expected);
+    if (actualBuffer.length !== expectedBuffer.length || !crypto.timingSafeEqual(actualBuffer, expectedBuffer)) {
+      return null;
+    }
+
+    try {
+      const session = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
+      return session.expiresAt > Date.now() ? session : null;
+    } catch (_error) {
+      return null;
+    }
+  }
+
+  verifyPassword(password = '') {
+    const encoded = process.env.AUTH_PASSWORD_HASH || '';
+    const [salt, expected] = encoded.split(':');
+    if (!salt || !expected) return false;
+    const actual = crypto.pbkdf2Sync(password, salt, 210000, 32, 'sha256').toString('hex');
+    const actualBuffer = Buffer.from(actual);
+    const expectedBuffer = Buffer.from(expected);
+    return actualBuffer.length === expectedBuffer.length && crypto.timingSafeEqual(actualBuffer, expectedBuffer);
+  }
+
+  requireAuth() {
+    return (req, res, next) => {
+      const token = this.parseCookies(req.headers.cookie || '').yaa_session;
+      const session = this.verifySessionToken(token);
+      if (!session) {
+        if (req.path.startsWith('/api/') || req.path === '/analytics' || req.path === '/schedule') {
+          return res.status(401).json({ success: false, error: 'Authentication required' });
+        }
+        return res.redirect('/login');
+      }
+      req.user = session;
+      return next();
+    };
+  }
+
   validateGenerateRequestBody(body = {}) {
     if (!body || typeof body !== 'object' || Array.isArray(body)) {
       return { valid: false, status: 400, error: 'Request body must be a JSON object' };
@@ -198,15 +267,69 @@ class YouTubeAutomationAgent {
     return { valid: true, value };
   }
   setupAPI() {
+    this.app.set('trust proxy', 1);
     this.app.use(express.json({ limit: '1mb' }));
-    this.app.use(express.static(path.join(__dirname, 'dashboard')));
+    this.app.use((_req, res, next) => {
+      res.setHeader('Content-Security-Policy', "default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'");
+      res.setHeader('Referrer-Policy', 'no-referrer');
+      res.setHeader('X-Content-Type-Options', 'nosniff');
+      res.setHeader('X-Frame-Options', 'DENY');
+      next();
+    });
+    this.app.use('/index.html', this.requireAuth());
+    this.app.get('/login.html', (_req, res) => res.redirect('/login'));
+    this.app.use(express.static(path.join(__dirname, 'dashboard'), { index: false }));
 
-    if (!process.env.API_KEY) {
-      this.logger.warn('API_KEY is not set; mutating API routes are unprotected');
+    if (!process.env.AUTH_USERNAME || !process.env.AUTH_PASSWORD_HASH || !process.env.SESSION_SECRET) {
+      throw new Error('AUTH_USERNAME, AUTH_PASSWORD_HASH, and SESSION_SECRET are required');
     }
-    
+
+    this.app.get('/login', (req, res) => {
+      const token = this.parseCookies(req.headers.cookie || '').yaa_session;
+      if (this.verifySessionToken(token)) return res.redirect('/');
+      return res.sendFile(path.join(__dirname, 'dashboard', 'login.html'));
+    });
+
+    this.app.post('/api/auth/login', (req, res) => {
+      const ip = req.ip || req.socket?.remoteAddress || 'unknown';
+      const now = Date.now();
+      const attempt = this.loginAttempts.get(ip) || { count: 0, resetAt: now + 15 * 60 * 1000 };
+      if (attempt.resetAt <= now) {
+        attempt.count = 0;
+        attempt.resetAt = now + 15 * 60 * 1000;
+      }
+      if (attempt.count >= 5) {
+        return res.status(429).json({ success: false, error: 'Muitas tentativas. Aguarde alguns minutos.' });
+      }
+
+      const submittedUsername = Buffer.from(typeof req.body?.username === 'string' ? req.body.username : '');
+      const configuredUsername = Buffer.from(process.env.AUTH_USERNAME);
+      const usernameMatches = submittedUsername.length === configuredUsername.length &&
+        crypto.timingSafeEqual(submittedUsername, configuredUsername);
+      const passwordMatches = typeof req.body?.password === 'string' && this.verifyPassword(req.body.password);
+      if (!usernameMatches || !passwordMatches) {
+        attempt.count += 1;
+        this.loginAttempts.set(ip, attempt);
+        return res.status(401).json({ success: false, error: 'Usuário ou senha incorretos.' });
+      }
+
+      this.loginAttempts.delete(ip);
+      const token = this.createSessionToken(process.env.AUTH_USERNAME);
+      res.setHeader('Set-Cookie', `yaa_session=${token}; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=43200`);
+      return res.json({ success: true });
+    });
+
+    this.app.post('/api/auth/logout', this.requireAuth(), (_req, res) => {
+      res.setHeader('Set-Cookie', 'yaa_session=; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=0');
+      return res.json({ success: true });
+    });
+
+    this.app.get('/api/auth/status', this.requireAuth(), (req, res) => {
+      res.json({ authenticated: true, username: req.user.username });
+    });
+
     // Main dashboard route
-    this.app.get('/', (req, res) => {
+    this.app.get('/', this.requireAuth(), (req, res) => {
       res.sendFile(path.join(__dirname, 'dashboard', 'index.html'));
     });
     
@@ -222,7 +345,7 @@ class YouTubeAutomationAgent {
     });
 
     // Manual content generation
-    this.app.post('/generate', this.requireAPIKey(), async (req, res) => {
+    this.app.post('/generate', this.requireAuth(), async (req, res) => {
       try {
         const validation = this.validateGenerateRequestBody(req.body);
         if (!validation.valid) {
@@ -238,7 +361,7 @@ class YouTubeAutomationAgent {
     });
 
     // Get analytics
-    this.app.get('/analytics', async (req, res) => {
+    this.app.get('/analytics', this.requireAuth(), async (req, res) => {
       try {
         const analytics = await this.agents.analytics.getRecentAnalytics();
         res.json(analytics);
@@ -248,7 +371,7 @@ class YouTubeAutomationAgent {
     });
 
     // Get upcoming schedule
-    this.app.get('/schedule', async (req, res) => {
+    this.app.get('/schedule', this.requireAuth(), async (req, res) => {
       try {
         const schedule = await this.db.getUpcomingSchedule();
         res.json(schedule);
@@ -258,7 +381,7 @@ class YouTubeAutomationAgent {
     });
 
     // Manual publish
-    this.app.post('/publish/:contentId', this.requireAPIKey(), async (req, res) => {
+    this.app.post('/publish/:contentId', this.requireAuth(), async (req, res) => {
       try {
         const { contentId } = req.params;
         const result = await this.agents.publishing.publishContent(contentId);
