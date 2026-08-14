@@ -25,6 +25,7 @@ class YouTubeAutomationAgent {
     this.credentials = null;
     this.agents = {};
     this.app = express();
+    this.app.disable('etag');
     this.isInitialized = false;
     this.loginAttempts = new Map();
     this.productionJobs = new Map();
@@ -550,6 +551,7 @@ class YouTubeAutomationAgent {
 
     this.app.get('/production-status', this.requireAuth(), async (_req, res) => {
       try {
+        res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
         const persisted = await this.db.getProductionJobs(20);
         const merged = new Map(persisted.map((job) => [job.id, job]));
         for (const job of this.productionJobs.values()) merged.set(job.id, job);

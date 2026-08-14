@@ -123,7 +123,7 @@ function renderContents() {
     const youtubeLink = item.youtubeUrl ? `<a class="external-link" href="${text(item.youtubeUrl)}" target="_blank" rel="noopener noreferrer" aria-label="Abrir ${text(item.title)} no YouTube"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 4h6v6M20 4l-9 9"/><path d="M18 13v6a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h6"/></svg></a>` : '';
     return `<article class="library-card" data-content-id="${text(item.id)}" tabindex="0" role="button" aria-label="Abrir ${text(item.title)}"><span class="content-thumb" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m9 8 7 4-7 4z"/><rect x="3" y="4" width="18" height="16" rx="3"/></svg></span><div class="content-main"><strong title="${text(item.title)}">${text(item.title)}</strong><div class="library-meta"><span>${text(item.topic)}</span><span>${text(item.duration || 'Duração não informada')}</span><span>${text(formatDate(item.createdAt))}</span></div></div><div class="library-actions"><span class="status-badge status-${text(item.status)}">${text(statusText)}</span>${youtubeLink}<button class="content-action" type="button" data-action="edit" aria-label="Editar ${text(item.title)}">Editar</button><button class="content-action danger" type="button" data-action="delete" aria-label="Apagar ${text(item.title)}">Apagar</button></div></article>`;
   }).join('') : emptyState(Boolean(query || status !== 'all'));
-  const emptyCreate = document.querySelector('[data-empty-create]');
+  const emptyCreate = $('content-library').querySelector('[data-empty-create]');
   if (emptyCreate) emptyCreate.addEventListener('click', () => showView('create'));
   document.querySelectorAll('[data-content-id]').forEach((card) => {
     const open = (event) => {

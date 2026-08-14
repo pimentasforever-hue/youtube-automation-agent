@@ -158,7 +158,7 @@ class ProductionManagementAgent {
       originalPath: scriptPath,
       ttsPath: scriptPath.replace('.json', '_tts.txt'),
       duration: script.duration,
-      sections: script.mainContent.sections.length
+      sections: Array.isArray(script.mainContent?.sections) ? script.mainContent.sections.length : 0
     };
   }
 
@@ -179,7 +179,7 @@ class ProductionManagementAgent {
     }
     
     // Add main content
-    if (script.mainContent && script.mainContent.sections) {
+    if (Array.isArray(script.mainContent?.sections)) {
       script.mainContent.sections.forEach((section, index) => {
         ttsText += `Section ${index + 1}: ${section.title}\n`;
         
@@ -189,12 +189,12 @@ class ProductionManagementAgent {
               ttsText += `${line}\n`;
             }
           });
-        } else if (section.steps) {
+        } else if (Array.isArray(section.steps)) {
           section.steps.forEach(step => {
             ttsText += `${step.title}. ${step.description}\n`;
             ttsText += `${step.tip}\n`;
           });
-        } else if (section.items) {
+        } else if (Array.isArray(section.items)) {
           section.items.forEach(item => {
             ttsText += `Number ${item.number}: ${item.title}. ${item.description}\n`;
           });
@@ -208,7 +208,7 @@ class ProductionManagementAgent {
     
     // Add conclusion
     if (script.conclusion) {
-      script.conclusion.recap.forEach(line => {
+      (Array.isArray(script.conclusion.recap) ? script.conclusion.recap : []).forEach(line => {
         if (typeof line === 'string') {
           ttsText += `${line}\n`;
         }
@@ -349,7 +349,7 @@ class ProductionManagementAgent {
     });
     
     // Content sections
-    if (script.mainContent && script.mainContent.sections) {
+    if (Array.isArray(script.mainContent?.sections)) {
       script.mainContent.sections.forEach((section, index) => {
         // Section title
         elements.push({
@@ -361,7 +361,7 @@ class ProductionManagementAgent {
         });
         
         // Content visuals
-        if (section.type === 'list_items' && section.items) {
+        if (section.type === 'list_items' && Array.isArray(section.items)) {
           section.items.forEach(item => {
             elements.push({
               type: 'list_item',
@@ -375,7 +375,7 @@ class ProductionManagementAgent {
               animation: 'zoom_in'
             });
           });
-        } else if (section.type === 'solution_steps' && section.steps) {
+        } else if (section.type === 'solution_steps' && Array.isArray(section.steps)) {
           section.steps.forEach(step => {
             elements.push({
               type: 'step',
@@ -526,7 +526,7 @@ class ProductionManagementAgent {
     }
     
     // Main content
-    if (script.mainContent && script.mainContent.sections) {
+    if (Array.isArray(script.mainContent?.sections)) {
       script.mainContent.sections.forEach(section => {
         let sectionText = '';
         
@@ -534,11 +534,11 @@ class ProductionManagementAgent {
           sectionText = section.content.filter(line => 
             typeof line === 'string' && !line.startsWith('[')
           ).join(' ');
-        } else if (section.steps) {
+        } else if (Array.isArray(section.steps)) {
           sectionText = section.steps.map(step => 
             `${step.title}. ${step.description}`
           ).join(' ');
-        } else if (section.items) {
+        } else if (Array.isArray(section.items)) {
           sectionText = section.items.map(item => 
             `Number ${item.number}: ${item.title}. ${item.description}`
           ).join(' ');
@@ -555,7 +555,7 @@ class ProductionManagementAgent {
     
     // Conclusion
     if (script.conclusion) {
-      const conclusionText = script.conclusion.recap.join(' ') + ' ' + script.conclusion.finalThought;
+      const conclusionText = `${Array.isArray(script.conclusion.recap) ? script.conclusion.recap.join(' ') : ''} ${script.conclusion.finalThought || ''}`.trim();
       processText(conclusionText, currentTime, 30);
       currentTime += 30;
     }
@@ -647,7 +647,7 @@ class ProductionManagementAgent {
     prompts.push(`${script.title}, ethereal storytelling, mystical background`);
     
     // Content-based prompts
-    if (script.mainContent && script.mainContent.sections) {
+    if (Array.isArray(script.mainContent?.sections)) {
       script.mainContent.sections.forEach(section => {
         if (section.title) {
           prompts.push(`${section.title}, ethereal dreamscape, creative visualization`);
