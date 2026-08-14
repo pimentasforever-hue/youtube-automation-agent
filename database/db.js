@@ -687,6 +687,23 @@ class Database {
     }));
   }
 
+  async recoverInterruptedProductions() {
+    const interrupted = await this.getAllRows("SELECT id, created_at FROM productions WHERE status = 'processing'");
+    for (const production of interrupted) {
+      await this.executeQuery("UPDATE productions SET status = 'failed' WHERE id = ?", [production.id]);
+      await this.saveProductionJob({
+        id: `recovered_${production.id}`,
+        stage: 'failed',
+        progress: 100,
+        message: 'Produção interrompida por uma reinicialização. Inicie novamente para continuar.',
+        result: { contentId: production.id },
+        startedAt: production.created_at || new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      });
+    }
+    return interrupted.length;
+  }
+
   postgresQuery(query) {
     let index = 0;
     let sql = query
