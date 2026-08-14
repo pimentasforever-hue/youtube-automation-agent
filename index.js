@@ -508,16 +508,21 @@ class YouTubeAutomationAgent {
           const seconds = Math.round((targetMinutes * 60) / fallbackCount);
           return res.json({ success: true, sceneCount: fallbackCount, reason: `Recomendação calculada: ${fallbackCount} cenas, com uma mudança visual a cada ${seconds} segundos.` });
         }
-        const sample = script.length > 12000 ? `${script.slice(0, 6000)}\n\n[FINAL]\n${script.slice(-6000)}` : script;
-        const answer = await reviewer.generateText(`Você é um diretor de vídeos para YouTube. Recomende uma quantidade de cenas entre 3 e 24 para um vídeo de ${targetMinutes} minutos no formato ${style}. O objetivo é manter ritmo visual, clareza e retenção sem criar cortes excessivos. Quantidade calculada como referência: ${fallbackCount}. Considere o roteiro quando ele estiver disponível. Responda somente em JSON válido com as chaves sceneCount, que deve ser um número inteiro, e reason, com uma explicação curta em português do Brasil. Não use travessão.\n\nROTEIRO:\n${sample || 'Roteiro ainda não informado.'}`, { maxTokens: 300, temperature: 0.2 });
-        const jsonText = String(answer).match(/\{[\s\S]*\}/)?.[0];
-        const parsed = jsonText ? JSON.parse(jsonText) : {};
-        const sceneCount = Math.min(24, Math.max(3, Math.round(Number(parsed.sceneCount) || fallbackCount)));
-        const seconds = Math.round((targetMinutes * 60) / sceneCount);
-        const reason = typeof parsed.reason === 'string' && parsed.reason.trim()
-          ? parsed.reason.trim().replace(/[\u2013\u2014]/g, ',')
-          : `Recomendo ${sceneCount} cenas, com uma mudança visual a cada ${seconds} segundos.`;
-        return res.json({ success: true, sceneCount, reason });
+        try {
+          const sample = script.length > 12000 ? `${script.slice(0, 6000)}\n\n[FINAL]\n${script.slice(-6000)}` : script;
+          const answer = await reviewer.generateText(`Você é um diretor de vídeos para YouTube. Recomende uma quantidade de cenas entre 3 e 24 para um vídeo de ${targetMinutes} minutos no formato ${style}. O objetivo é manter ritmo visual, clareza e retenção sem criar cortes excessivos. Quantidade calculada como referência: ${fallbackCount}. Considere o roteiro quando ele estiver disponível. Responda somente em JSON válido com as chaves sceneCount, que deve ser um número inteiro, e reason, com uma explicação curta em português do Brasil. Não use travessão.\n\nROTEIRO:\n${sample || 'Roteiro ainda não informado.'}`, { maxTokens: 300, temperature: 0.2 });
+          const jsonText = String(answer).match(/\{[\s\S]*\}/)?.[0];
+          const parsed = jsonText ? JSON.parse(jsonText) : {};
+          const sceneCount = Math.min(24, Math.max(3, Math.round(Number(parsed.sceneCount) || fallbackCount)));
+          const seconds = Math.round((targetMinutes * 60) / sceneCount);
+          const reason = typeof parsed.reason === 'string' && parsed.reason.trim()
+            ? parsed.reason.trim().replace(/[\u2013\u2014]/g, ',')
+            : `Recomendo ${sceneCount} cenas, com uma mudança visual a cada ${seconds} segundos.`;
+          return res.json({ success: true, sceneCount, reason });
+        } catch (_aiError) {
+          const seconds = Math.round((targetMinutes * 60) / fallbackCount);
+          return res.json({ success: true, sceneCount: fallbackCount, reason: `Recomendo ${fallbackCount} cenas, com uma mudança visual a cada ${seconds} segundos. A sugestão foi calculada pelo ritmo do formato.` });
+        }
       } catch (error) {
         return res.status(500).json({ success: false, error: error.message });
       }
