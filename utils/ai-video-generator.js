@@ -11,6 +11,7 @@ const { GeminiClientPool, geminiKeys } = require('./gemini-client-pool');
 class AIVideoGenerator {
   constructor(credentials) {
     this.logger = new Logger('AIVideoGenerator');
+    credentials = credentials || {};
     
     // Initialize AI services with graceful fallback
     const openaiKey = credentials.openai?.apiKey || process.env.OPENAI_API_KEY;
@@ -30,6 +31,17 @@ class AIVideoGenerator {
       this.logger.warn('Replicate API key not found - advanced video generation unavailable');
     }
 
+    this.cloudflareAccountId = credentials.cloudflare?.accountId
+      || process.env.CLOUDFLARE_ACCOUNT_ID
+      || process.env.R2_ACCOUNT_ID;
+    this.cloudflareAIApiToken = credentials.cloudflare?.apiToken
+      || process.env.CLOUDFLARE_AI_API_TOKEN;
+    this.cloudflareImageModel = process.env.CLOUDFLARE_IMAGE_MODEL
+      || '@cf/black-forest-labs/flux-1-schnell';
+    this.cloudflareImageSteps = Math.min(8, Math.max(1, Number(process.env.CLOUDFLARE_IMAGE_STEPS) || 4));
+    this.cloudflareAI = Boolean(this.cloudflareAccountId && this.cloudflareAIApiToken);
+    if (this.cloudflareAI) this.logger.info('Cloudflare Workers AI image service initialized');
+
     // Gemini media generation (images + native TTS) , free-tier alternative to OpenAI
     const geminiKey = credentials.gemini?.apiKey || process.env.GEMINI_API_KEY;
     if (geminiKey) {
@@ -41,6 +53,9 @@ class AIVideoGenerator {
         this.logger.warn('Failed to initialize Gemini media service:', error.message);
       }
     }
+
+    const requestedImageProvider = String(process.env.IMAGE_PROVIDER || '').trim().toLowerCase();
+    this.imageProvider = requestedImageProvider || (this.cloudflareAI ? 'cloudflare' : this.openai ? 'openai' : this.gemini ? 'gemini' : null);
     
     // ElevenLabs configuration
     this.elevenLabsApiKey = credentials.elevenLabs?.apiKey || process.env.ELEVENLABS_API_KEY;
@@ -213,7 +228,7 @@ class AIVideoGenerator {
     this.logger.info(`Generating ${count} visual assets with style: ${style}`);
 
     try {
-      if (!this.openai && !this.gemini) {
+      if (!this.hasConfiguredImageProvider()) {
         throw new Error('Nenhum provedor de imagens está configurado.');
       }
 
@@ -230,22 +245,84 @@ class AIVideoGenerator {
       return localPaths;
     } catch (error) {
       this.logger.error('Visual asset generation failed:', error);
-      throw new Error(`Não foi possível gerar as imagens: ${error.message}`);
+      throw new Error(this.formatImageGenerationError(error));
     }
+  }
+
+  hasConfiguredImageProvider() {
+    if (this.imageProvider === 'cloudflare') return this.cloudflareAI;
+    if (this.imageProvider === 'openai') return Boolean(this.openai);
+    if (this.imageProvider === 'gemini') return Boolean(this.gemini);
+    return false;
   }
 
   async generateImage(prompt, imagePath) {
     await fs.mkdir(path.dirname(imagePath), { recursive: true });
 
-    if (this.openai) {
+    if (this.imageProvider === 'cloudflare' && this.cloudflareAI) {
+      return await this.generateCloudflareImage(prompt, imagePath);
+    }
+
+    if (this.imageProvider === 'openai' && this.openai) {
       return await this.generateOpenAIImage(prompt, imagePath);
     }
 
-    if (this.gemini) {
+    if (this.imageProvider === 'gemini' && this.gemini) {
       return await this.generateGeminiImage(prompt, imagePath);
     }
 
-    throw new Error('No image generation provider configured');
+    throw new Error(`O provedor de imagens ${this.imageProvider || 'solicitado'} não está configurado.`);
+  }
+
+  async generateCloudflareImage(prompt, imagePath) {
+    const modelPath = this.cloudflareImageModel.split('/').map(encodeURIComponent).join('/');
+    const url = `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(this.cloudflareAccountId)}/ai/run/${modelPath}`;
+
+    try {
+      const response = await axios.post(url, {
+        prompt: String(prompt || '').slice(0, 2048),
+        steps: this.cloudflareImageSteps
+      }, {
+        headers: {
+          Authorization: `Bearer ${this.cloudflareAIApiToken}`,
+          'Content-Type': 'application/json'
+        },
+        timeout: Math.max(15000, Number(process.env.CLOUDFLARE_AI_TIMEOUT_MS) || 120000)
+      });
+
+      const encodedImage = response.data?.result?.image || response.data?.image;
+      if (!encodedImage) throw new Error('O Cloudflare Workers AI não retornou uma imagem.');
+
+      const base64 = String(encodedImage).replace(/^data:image\/[a-z0-9.+-]+;base64,/i, '');
+      const buffer = Buffer.from(base64, 'base64');
+      if (!buffer.length) throw new Error('O Cloudflare Workers AI retornou uma imagem vazia.');
+
+      await fs.writeFile(imagePath, buffer);
+      return imagePath;
+    } catch (error) {
+      throw new Error(this.formatCloudflareImageError(error));
+    }
+  }
+
+  formatCloudflareImageError(error) {
+    const status = Number(error?.response?.status || error?.status || error?.code);
+    if (status === 429) {
+      return 'A cota gratuita diária do Cloudflare Workers AI terminou. Ela será renovada automaticamente às 00:00 UTC.';
+    }
+    if (status === 401 || status === 403) {
+      return 'O token do Cloudflare Workers AI não tem permissão para gerar imagens.';
+    }
+    if (/timeout|timed out|aborted/i.test(String(error?.message || ''))) {
+      return 'O Cloudflare Workers AI demorou demais para responder.';
+    }
+    return String(error?.message || 'O Cloudflare Workers AI não conseguiu gerar a imagem.');
+  }
+
+  formatImageGenerationError(error) {
+    const message = this.imageProvider === 'cloudflare'
+      ? this.formatCloudflareImageError(error)
+      : String(error?.message || 'O provedor de imagens não respondeu.');
+    return `Não foi possível gerar as imagens: ${message}`;
   }
 
   async generateOpenAIImage(prompt, imagePath) {

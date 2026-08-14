@@ -27,6 +27,7 @@ class SystemTest {
       { name: 'Placeholder Scheduling Guard', test: () => this.testPlaceholderSchedulingGuard() },
       { name: 'FFmpeg Resolution', test: () => this.testFFmpegResolution() },
       { name: 'Gemini Media Provider Selection', test: () => this.testGeminiMediaProvider() },
+      { name: 'Cloudflare Image Provider', test: () => this.testCloudflareImageProvider() },
       { name: 'Slideshow Renderer', test: () => this.testSlideshowRenderer() },
       { name: 'Evergreen Template Topics', test: () => this.testEvergreenTopics() },
       { name: 'Walkthrough Module', test: () => this.testWalkthroughModule() },
@@ -513,6 +514,48 @@ class SystemTest {
     }
 
     this.logger.info('Gemini media provider selection test completed successfully');
+  }
+
+  async testCloudflareImageProvider() {
+    const { AIVideoGenerator } = require('./utils/ai-video-generator');
+    const envKeys = ['OPENAI_API_KEY', 'GEMINI_API_KEY', 'CLOUDFLARE_ACCOUNT_ID', 'CLOUDFLARE_AI_API_TOKEN', 'IMAGE_PROVIDER', 'R2_ACCOUNT_ID'];
+    const savedEnv = {};
+    for (const key of envKeys) {
+      savedEnv[key] = process.env[key];
+      delete process.env[key];
+    }
+
+    try {
+      process.env.IMAGE_PROVIDER = 'cloudflare';
+      const generator = new AIVideoGenerator({
+        cloudflare: { accountId: 'account-test', apiToken: 'token-test' },
+        gemini: { apiKey: 'gemini-test' }
+      });
+
+      if (!generator.cloudflareAI || generator.imageProvider !== 'cloudflare') {
+        throw new Error('Cloudflare was not selected as the image provider');
+      }
+      if (!generator.hasConfiguredImageProvider()) {
+        throw new Error('Cloudflare image provider was not recognized as configured');
+      }
+
+      const quotaError = generator.formatCloudflareImageError({ response: { status: 429 } });
+      if (!/cota gratuita diária/i.test(quotaError) || quotaError.includes('{"error"')) {
+        throw new Error('Cloudflare quota error was not simplified');
+      }
+
+      const authError = generator.formatCloudflareImageError({ response: { status: 403 } });
+      if (!/permissão/i.test(authError)) {
+        throw new Error('Cloudflare permission error was not simplified');
+      }
+    } finally {
+      for (const key of envKeys) {
+        if (savedEnv[key] === undefined) delete process.env[key];
+        else process.env[key] = savedEnv[key];
+      }
+    }
+
+    this.logger.info('Cloudflare image provider test completed successfully');
   }
 
   async testSlideshowRenderer() {
