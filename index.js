@@ -435,13 +435,17 @@ class YouTubeAutomationAgent {
     });
 
     this.app.get('/connections', this.requireAuth(), async (_req, res) => {
+      const result = {
+        youtube: { connected: false },
+        ai: { connected: this.credentials.hasAITextProvider(), provider: process.env.GEMINI_API_KEY ? 'Gemini' : process.env.OPENAI_API_KEY ? 'OpenAI' : null },
+        storage: { connected: Boolean(process.env.R2_ACCOUNT_ID && process.env.R2_ACCESS_KEY_ID && process.env.R2_SECRET_ACCESS_KEY && process.env.R2_BUCKET), provider: process.env.R2_BUCKET ? 'Cloudflare R2' : 'Railway Volume', bucket: process.env.R2_BUCKET || null }
+      };
       try {
         const youtube = this.credentials.getYouTubeClient();
-        const response = await youtube.channels.list({ part: 'snippet,statistics,brandingSettings,contentDetails,status', mine: true });
+        const response = await youtube.channels.list({ part: 'snippet,statistics', mine: true });
         const channel = response.data.items?.[0];
-        if (!channel) return res.status(404).json({ error: 'Nenhum canal encontrado nesta conta.' });
-        res.json({
-          youtube: {
+        if (channel) {
+          result.youtube = {
             connected: true,
             id: channel.id,
             title: channel.snippet?.title,
@@ -453,15 +457,13 @@ class YouTubeAutomationAgent {
             subscribers: Number(channel.statistics?.subscriberCount || 0),
             views: Number(channel.statistics?.viewCount || 0),
             videos: Number(channel.statistics?.videoCount || 0),
-            privacyStatus: channel.status?.privacyStatus,
-            uploadsPlaylist: channel.contentDetails?.relatedPlaylists?.uploads
-          },
-          ai: { connected: this.credentials.hasAITextProvider(), provider: process.env.GEMINI_API_KEY ? 'Gemini' : process.env.OPENAI_API_KEY ? 'OpenAI' : null },
-          storage: { connected: Boolean(process.env.R2_ACCOUNT_ID && process.env.R2_ACCESS_KEY_ID && process.env.R2_SECRET_ACCESS_KEY && process.env.R2_BUCKET), provider: process.env.R2_BUCKET ? 'Cloudflare R2' : 'Railway Volume', bucket: process.env.R2_BUCKET || null }
-        });
+            privacyStatus: channel.status?.privacyStatus
+          };
+        }
       } catch (error) {
-        res.status(500).json({ error: error.message });
+        this.logger.warn(`Could not read YouTube channel details: ${error.message}`);
       }
+      res.json(result);
     });
 
     const allowedSettings = new Set(['default_target_minutes', 'default_scene_count', 'default_privacy', 'default_narration', 'default_captions', 'auto_publish_enabled']);
