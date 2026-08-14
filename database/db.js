@@ -727,6 +727,19 @@ class Database {
     return interrupted.length;
   }
 
+  async recoverInterruptedProductionJobs() {
+    const interrupted = await this.getAllRows("SELECT id FROM production_jobs WHERE stage NOT IN ('completed', 'failed')");
+    if (!interrupted.length) return 0;
+    const updatedAt = new Date().toISOString();
+    for (const job of interrupted) {
+      await this.executeQuery(
+        "UPDATE production_jobs SET stage = 'failed', progress = 100, message = ?, updated_at = ? WHERE id = ?",
+        ['Produção interrompida por uma reinicialização. Inicie novamente para continuar.', updatedAt, job.id]
+      );
+    }
+    return interrupted.length;
+  }
+
   postgresQuery(query) {
     let index = 0;
     let sql = query

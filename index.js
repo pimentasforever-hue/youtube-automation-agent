@@ -42,6 +42,8 @@ class YouTubeAutomationAgent {
       await this.db.ensureUser(process.env.AUTH_USERNAME, process.env.AUTH_PASSWORD_HASH);
       const interruptedCount = await this.db.recoverInterruptedProductions();
       if (interruptedCount) this.logger.warn(`${interruptedCount} interrupted production(s) recovered from the previous process`);
+      const interruptedJobCount = await this.db.recoverInterruptedProductionJobs();
+      if (interruptedJobCount) this.logger.warn(`${interruptedJobCount} interrupted production job(s) closed after restart`);
       
       // Load credentials
       this.logger.info('Loading credentials...');
