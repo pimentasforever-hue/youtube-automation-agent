@@ -396,19 +396,34 @@ class Database {
       ORDER BY p.created_at DESC`
     );
 
-    return rows.map(row => ({
-      id: row.id,
-      title: row.title,
-      topic: row.topic,
-      status: row.status,
-      duration: row.estimated_duration,
-      scheduledFor: row.scheduled_publish_time,
-      createdAt: row.created_at,
-      thumbnailPath: row.thumbnail_path,
-      youtubeUrl: row.youtube_url,
-      publishedAt: row.published_at,
-      assets: JSON.parse(row.assets || '{}'),
-      timeline: JSON.parse(row.timeline || '{}')
+    return Promise.all(rows.map(async row => {
+      const assets = JSON.parse(row.assets || '{}');
+      let title = row.title;
+
+      if (title === 'Conteúdo sem título' && assets.script?.originalPath) {
+        try {
+          const scriptPath = path.join(__dirname, '..', 'data', 'scripts', path.basename(assets.script.originalPath));
+          const script = JSON.parse(await fs.readFile(scriptPath, 'utf8'));
+          if (typeof script.title === 'string' && script.title.trim()) title = script.title.trim();
+        } catch {
+          // Older production assets may no longer have their source script file.
+        }
+      }
+
+      return {
+        id: row.id,
+        title,
+        topic: row.topic,
+        status: row.status,
+        duration: row.estimated_duration,
+        scheduledFor: row.scheduled_publish_time,
+        createdAt: row.created_at,
+        thumbnailPath: row.thumbnail_path,
+        youtubeUrl: row.youtube_url,
+        publishedAt: row.published_at,
+        assets,
+        timeline: JSON.parse(row.timeline || '{}')
+      };
     }));
   }
 
