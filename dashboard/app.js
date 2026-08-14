@@ -15,6 +15,8 @@ const viewTitles = {
 const statusLabels = { processing: 'Em produção', ready: 'Pronto', scheduled: 'Agendado', published: 'Publicado', simulated: 'Precisa de atenção', failed: 'Falhou' };
 let contentItems = [];
 let selectedContentId = null;
+const initialContentId = window.location.pathname.match(/^\/conteudos\/([^/]+)$/)?.[1] || null;
+let initialContentOpened = false;
 
 function text(value) {
   return String(value ?? '').replace(/[&<>"']/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character]);
@@ -58,7 +60,7 @@ function showView(name, updateHash = true) {
   });
   $('page-kicker').textContent = viewTitles[view][0];
   $('page-title').textContent = viewTitles[view][1];
-  if (updateHash) window.history.replaceState(null, '', `#${view}`);
+  if (updateHash) window.history.replaceState(null, '', view === 'detail' && selectedContentId ? `/conteudos/${encodeURIComponent(selectedContentId)}` : `/#${view}`);
   closeSidebar();
   $('main-content').focus({ preventScroll: true });
 }
@@ -148,6 +150,7 @@ function openContent(id) {
   $('video-frame').innerHTML = item.videoUrl ? `<video controls playsinline preload="metadata" src="${text(item.videoUrl)}"${item.thumbnailUrl ? ` poster="${text(item.thumbnailUrl)}"` : ''}></video>` : '<div class="video-empty"><strong>Vídeo ainda indisponível</strong><p>Quando a montagem terminar, o player aparecerá aqui.</p></div>';
   $('edit-content-form').hidden = true;
   showView('detail');
+  window.history.replaceState(null, '', `/conteudos/${encodeURIComponent(id)}`);
 }
 
 function beginContentEdit(id = selectedContentId) {
@@ -238,6 +241,10 @@ async function loadDashboard() {
     updateSchedule(await scheduleResponse.json());
     const analytics = await analyticsResponse.json();
     updateContents(await contentsResponse.json());
+    if (initialContentId && !initialContentOpened) {
+      initialContentOpened = true;
+      openContent(decodeURIComponent(initialContentId));
+    }
     updateMetrics(analytics);
     if (connectionsResponse.ok) updateConnections(await connectionsResponse.json());
     if (jobsResponse.ok) updateJobs(await jobsResponse.json());
@@ -443,7 +450,7 @@ $('account-form').addEventListener('submit', async (event) => {
   setTimeout(() => window.location.assign('/login'), 900);
 });
 
-showView(window.location.hash.slice(1) || 'overview', false);
+showView(initialContentId ? 'detail' : window.location.hash.slice(1) || 'overview', false);
 loadDashboard();
 loadSettings();
 setInterval(loadDashboard, 30000);

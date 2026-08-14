@@ -24,6 +24,9 @@ class R2Storage {
 
   async uploadProductionAssets(production) {
     if (!this.enabled) return production;
+    if (production.assets.finalVideo?.simulated || path.extname(production.assets.finalVideo?.path || '').toLowerCase() !== '.mp4') {
+      throw new Error('Upload bloqueado: a produção não possui um arquivo MP4 válido.');
+    }
     const prefix = `productions/${production.id}`;
     const tasks = [
       ['finalVideo', production.assets.finalVideo?.path, 'video.mp4', 'video/mp4'],
@@ -32,6 +35,7 @@ class R2Storage {
       ['thumbnail', production.assets.thumbnail?.path || production.assets.thumbnail?.localPath, 'thumbnail.png', 'image/png']
     ];
     for (const [name, filePath, filename, contentType] of tasks) {
+      if (production.assets[name]?.simulated) continue;
       if (!filePath || !fs.existsSync(filePath)) continue;
       const uploaded = await this.upload(filePath, path.posix.join(prefix, filename), contentType);
       production.assets[name] = { ...production.assets[name], ...uploaded };

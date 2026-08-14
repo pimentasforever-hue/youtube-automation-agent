@@ -70,8 +70,7 @@ class AIVideoGenerator {
         return await this.generateGeminiTTS(text, outputPath);
       }
 
-      // Final fallback to simulation
-      return await this.simulateTTSGeneration(text, outputPath);
+      throw new Error('Nenhum provedor de narração está configurado.');
     } catch (error) {
       this.logger.error('TTS generation failed:', error);
       throw error;
@@ -132,6 +131,46 @@ class AIVideoGenerator {
   }
 
   async generateGeminiTTS(text, outputPath) {
+    const chunks = this.splitTextForTTS(text);
+    if (chunks.length > 1) return await this.generateGeminiTTSChunks(chunks, outputPath);
+    return await this.generateGeminiTTSChunk(text, outputPath);
+  }
+
+  splitTextForTTS(text, maxCharacters = 3000) {
+    const sentences = String(text || '').match(/[^.!?]+[.!?]+|[^.!?]+$/g) || [''];
+    const chunks = [];
+    let current = '';
+    for (const sentence of sentences) {
+      const candidate = current ? `${current} ${sentence.trim()}` : sentence.trim();
+      if (candidate.length > maxCharacters && current) {
+        chunks.push(current);
+        current = sentence.trim();
+      } else {
+        current = candidate;
+      }
+    }
+    if (current) chunks.push(current);
+    return chunks.length ? chunks : [''];
+  }
+
+  async generateGeminiTTSChunks(chunks, outputPath) {
+    const partPaths = [];
+    const listPath = `${outputPath}.concat.txt`;
+    try {
+      for (let index = 0; index < chunks.length; index += 1) {
+        const partPath = `${outputPath}.part-${String(index).padStart(3, '0')}.mp3`;
+        await this.generateGeminiTTSChunk(chunks[index], partPath);
+        partPaths.push(partPath);
+      }
+      await fs.writeFile(listPath, partPaths.map(part => `file '${part}'`).join('\n'));
+      await runFFmpeg(['-y', '-f', 'concat', '-safe', '0', '-i', listPath, '-c', 'copy', outputPath]);
+      return outputPath;
+    } finally {
+      await Promise.all([...partPaths, listPath].map(file => fs.unlink(file).catch(() => {})));
+    }
+  }
+
+  async generateGeminiTTSChunk(text, outputPath) {
     const model = process.env.GEMINI_TTS_MODEL || 'gemini-3.1-flash-tts-preview';
     const voiceName = process.env.GEMINI_TTS_VOICE || 'Kore';
 
@@ -168,7 +207,7 @@ class AIVideoGenerator {
 
     try {
       if (!this.openai && !this.gemini) {
-        return await this.simulateVisualAssets(prompt, style, count);
+        throw new Error('Nenhum provedor de imagens está configurado.');
       }
 
       const enhancedPrompt = this.enhanceVisualPrompt(prompt, style);
@@ -184,7 +223,7 @@ class AIVideoGenerator {
       return localPaths;
     } catch (error) {
       this.logger.error('Visual asset generation failed:', error);
-      return await this.simulateVisualAssets(prompt, style, count);
+      throw new Error(`Não foi possível gerar as imagens: ${error.message}`);
     }
   }
 
@@ -226,7 +265,11 @@ class AIVideoGenerator {
 
     const response = await this.geminiPool.run((client) => client.models.generateContent({
       model,
-      contents: prompt
+      contents: prompt,
+      config: {
+        responseModalities: ['IMAGE'],
+        imageConfig: { aspectRatio: '16:9' }
+      }
     }));
 
     const parts = response.candidates?.[0]?.content?.parts || [];
@@ -281,7 +324,7 @@ class AIVideoGenerator {
       return await this.generateSlideshowVideo(script, visualAssets, audioPath, outputPath);
     } catch (error) {
       this.logger.error('Video generation failed:', error);
-      return await this.simulateVideoGeneration(script, visualAssets, audioPath, outputPath);
+      throw error;
     }
   }
 

@@ -3,6 +3,7 @@ const fs = require('fs').promises;
 const { Logger } = require('../utils/logger');
 const { AIVideoGenerator } = require('../utils/ai-video-generator');
 const { R2Storage } = require('../utils/r2-storage');
+const { runFFmpeg } = require('../utils/ffmpeg');
 
 class ProductionManagementAgent {
   constructor(db, credentials) {
@@ -111,15 +112,13 @@ class ProductionManagementAgent {
       onProgress('assembly', 88, 'Montando o vídeo final');
       await this.assembleVideo(productionData);
 
-      onProgress('storage', 92, 'Enviando o vídeo para o Cloudflare');
-      await this.storage.uploadProductionAssets(productionData);
-
-      // Mark as ready , or simulated, when no real video could be produced
       const simulated = Boolean(productionData.assets.finalVideo?.simulated);
       if (simulated) {
         productionData.status = 'simulated';
-        this.logger.warn(`Content ${productionId} produced PLACEHOLDER assets only , it will NOT be uploaded. Check your AI provider keys and FFmpeg installation.`);
+        throw new Error('A produção não gerou um vídeo válido. Os arquivos incompletos não foram enviados.');
       } else {
+        onProgress('storage', 92, 'Enviando o vídeo para o Cloudflare');
+        await this.storage.uploadProductionAssets(productionData);
         productionData.status = 'ready';
         productionData.timeline.readyForUpload = new Date().toISOString();
       }
@@ -449,8 +448,7 @@ class ProductionManagementAgent {
       return audioPath;
     } catch (error) {
       this.logger.error('AI audio generation failed:', error);
-      // Fallback to simulation
-      return await this.simulateAudioGeneration(productionData);
+      throw error;
     }
   }
 
@@ -584,6 +582,8 @@ class ProductionManagementAgent {
 
       // Get file stats
       const stats = await fs.stat(finalVideoPath);
+      if (stats.size < 10000) throw new Error('O arquivo final é pequeno demais para ser um vídeo válido.');
+      await runFFmpeg(['-v', 'error', '-i', finalVideoPath, '-f', 'null', '-']);
       
       productionData.assets.finalVideo = {
         path: finalVideoPath,
@@ -598,8 +598,7 @@ class ProductionManagementAgent {
       return finalVideoPath;
     } catch (error) {
       this.logger.error('AI video assembly failed:', error);
-      // Fallback to simulation
-      return await this.simulateVideoAssembly(productionData);
+      throw error;
     }
   }
 

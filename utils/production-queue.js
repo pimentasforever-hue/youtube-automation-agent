@@ -31,7 +31,8 @@ class ProductionQueue {
       const { jobId, options } = job.data;
       this.onProgress(jobId, 'processing', 5, 'Produção iniciada pelo worker');
       const result = await this.processJob(options, jobId);
-      this.onProgress(jobId, 'completed', 100, 'Conteúdo pronto', result);
+      const completed = result?.status === 'ready' || result?.status === 'published';
+      this.onProgress(jobId, completed ? 'completed' : 'failed', 100, completed ? 'Conteúdo pronto' : 'A produção terminou sem um vídeo válido.', result);
       return result;
       }, {
         connection: this.workerConnection,
@@ -68,7 +69,8 @@ class ProductionQueue {
       Promise.resolve().then(async () => {
         try {
           const result = await this.processJob(options, jobId);
-          this.onProgress(jobId, 'completed', 100, 'Conteúdo pronto', result);
+          const completed = result?.status === 'ready' || result?.status === 'published';
+          this.onProgress(jobId, completed ? 'completed' : 'failed', 100, completed ? 'Conteúdo pronto' : 'A produção terminou sem um vídeo válido.', result);
         } catch (error) {
           this.onProgress(jobId, 'failed', 100, 'Não foi possível concluir a produção.');
           this.logger.error(`Local production job ${jobId} failed:`, error);

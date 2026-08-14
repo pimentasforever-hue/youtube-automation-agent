@@ -452,6 +452,9 @@ class YouTubeAutomationAgent {
     this.app.get('/', this.requireAuth(), (req, res) => {
       res.sendFile(path.join(__dirname, 'dashboard', 'index.html'));
     });
+    this.app.get('/conteudos/:id', this.requireAuth(), (_req, res) => {
+      res.sendFile(path.join(__dirname, 'dashboard', 'index.html'));
+    });
     
     // Health check
     this.app.get('/health', (req, res) => {
