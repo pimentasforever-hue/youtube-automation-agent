@@ -2,7 +2,6 @@ const OpenAI = require('openai');
 const Replicate = require('replicate');
 const fs = require('fs').promises;
 const path = require('path');
-const { pathToFileURL } = require('url');
 const axios = require('axios');
 const sharp = require('sharp');
 const { Logger } = require('./logger');
@@ -444,39 +443,11 @@ class AIVideoGenerator {
       throw new Error(ffmpegInstallHint());
     }
 
-    const { chromium } = require('playwright');
-    const browser = await chromium.launch();
     const slidesDir = path.join(path.dirname(outputPath), 'slides');
 
     try {
-      const page = await browser.newPage();
-      await page.setViewportSize({ width: 1920, height: 1080 });
-
-      // Create HTML for slideshow (only real image files can be embedded)
       const imageAssets = await this.filterImageAssets(visualAssets);
-      await page.setContent(this.createSlideshowHTML(script, imageAssets));
-
-      // Freeze CSS transitions/animations so each still is captured fully rendered
-      await page.addStyleTag({ content: '* { transition: none !important; animation: none !important; }' });
-      await page.waitForTimeout(1000); // Wait for assets to load
-
-      // Capture ONE still per slide instead of screenshotting at 30fps ,
-      // FFmpeg turns the stills into a crossfaded video in seconds.
-      const slideCount = await page.evaluate(() => document.querySelectorAll('.slide').length);
-      await fs.mkdir(slidesDir, { recursive: true });
-
-      const stills = [];
-      for (let i = 0; i < slideCount; i++) {
-        await page.evaluate((index) => {
-          document.querySelectorAll('.slide').forEach((slide, s) => {
-            slide.classList.toggle('active', s === index);
-          });
-        }, i);
-
-        const stillPath = path.join(slidesDir, `slide_${String(i).padStart(3, '0')}.png`);
-        await page.screenshot({ path: stillPath });
-        stills.push(stillPath);
-      }
+      const stills = await this.createSlideStills(script, imageAssets, slidesDir);
 
       const videoPath = outputPath.replace('.mp4', '_visual.mp4');
       const duration = this.calculateScriptDuration(script);
@@ -487,9 +458,63 @@ class AIVideoGenerator {
 
       return outputPath;
     } finally {
-      await browser.close().catch(() => {});
       await this.cleanupDirectory(slidesDir);
     }
+  }
+
+  async createSlideStills(script, imageAssets, slidesDir) {
+    if (!imageAssets.length) throw new Error('Nenhuma imagem válida foi encontrada para montar o vídeo.');
+    await fs.mkdir(slidesDir, { recursive: true });
+    const texts = this.getSlideTexts(script);
+    const stills = [];
+
+    for (let index = 0; index < imageAssets.length; index += 1) {
+      const lines = this.wrapSlideText(texts[index % texts.length]);
+      const firstY = 540 - ((lines.length - 1) * 42);
+      const textRows = lines.map((line, lineIndex) => `<text x="960" y="${firstY + (lineIndex * 84)}" text-anchor="middle" font-family="Arial, sans-serif" font-size="58" font-weight="700" fill="#ffffff" stroke="#000000" stroke-width="2" paint-order="stroke">${this.escapeXml(line)}</text>`).join('');
+      const overlay = Buffer.from(`<svg width="1920" height="1080" xmlns="http://www.w3.org/2000/svg"><rect width="1920" height="1080" fill="rgba(0,0,0,0.28)"/><rect x="170" y="${firstY - 75}" width="1580" height="${lines.length * 84 + 70}" rx="34" fill="rgba(0,0,0,0.48)"/>${textRows}</svg>`);
+      const stillPath = path.join(slidesDir, `slide_${String(index).padStart(3, '0')}.png`);
+      await sharp(imageAssets[index])
+        .resize(1920, 1080, { fit: 'cover', position: 'centre' })
+        .modulate({ brightness: 0.82, saturation: 1.05 })
+        .composite([{ input: overlay }])
+        .png({ compressionLevel: 6 })
+        .toFile(stillPath);
+      stills.push(stillPath);
+    }
+    return stills;
+  }
+
+  getSlideTexts(script = {}) {
+    const texts = [script.title, script.hook?.text];
+    for (const section of script.mainContent?.sections || []) {
+      texts.push(section.title || section.heading || section.content);
+    }
+    texts.push(script.conclusion?.finalThought);
+    return texts.map(value => String(value || '').trim()).filter(Boolean).length
+      ? texts.map(value => String(value || '').trim()).filter(Boolean)
+      : ['Conteúdo em produção'];
+  }
+
+  wrapSlideText(value, maxCharacters = 38, maxLines = 3) {
+    const words = String(value || '').replace(/\s+/g, ' ').trim().split(' ').filter(Boolean);
+    const lines = [];
+    let current = '';
+    for (const word of words) {
+      const candidate = current ? `${current} ${word}` : word;
+      if (candidate.length > maxCharacters && current && lines.length < maxLines - 1) {
+        lines.push(current);
+        current = word;
+      } else {
+        current = candidate;
+      }
+    }
+    if (current) lines.push(current);
+    return lines.slice(0, maxLines);
+  }
+
+  escapeXml(value) {
+    return String(value || '').replace(/[<>&"']/g, character => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&apos;' })[character]);
   }
 
   async renderSlidesToVideo(stills, totalDuration, videoPath) {
@@ -545,7 +570,7 @@ class AIVideoGenerator {
 
       try {
         await fs.access(asset);
-        images.push(pathToFileURL(asset).href);
+        images.push(asset);
       } catch (error) {
         // Skip missing files
       }

@@ -821,7 +821,14 @@ class YouTubeAutomationAgent {
   }
 
   safeOperationalMessage(message) {
-    return String(message || '')
+    const value = String(message || '');
+    if (/gemini.*quota|quota exceeded.*gemini|RESOURCE_EXHAUSTED.*gemini/i.test(value)) {
+      return 'A cota de imagens do Gemini terminou. As novas tentativas usam o Cloudflare Workers AI.';
+    }
+    if (/browserType\.launch|Executable doesn't exist.*chromium/i.test(value)) {
+      return 'O renderizador de vídeo não encontrou o mecanismo necessário no servidor.';
+    }
+    return value
       .replace(/AIza[0-9A-Za-z_-]{20,}/g, '[chave removida]')
       .replace(/sk-[0-9A-Za-z_-]{16,}/g, '[chave removida]')
       .slice(0, 1200);

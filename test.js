@@ -166,11 +166,14 @@ class SystemTest {
     await db.createQueuedProduction({ id: contentId, title: 'Teste de acompanhamento', topic: 'Teste', script: 'Roteiro de teste', options: { targetMinutes: 2, sceneCount: 3 } });
     await db.saveProductionJob({ id: jobId, stage: 'processing', progress: 5, message: 'Worker iniciou', result: { contentId, worker: { status: 'active', heartbeatAt: new Date().toISOString() } }, startedAt: new Date().toISOString(), updatedAt: new Date().toISOString() });
     await db.recordProductionEvent({ jobId, contentId, level: 'info', stage: 'processing', progress: 5, message: 'Worker iniciou' });
+    const olderJobId = `${jobId}_old`;
+    await db.recordProductionEvent({ jobId: olderJobId, contentId, level: 'error', stage: 'failed', progress: 100, message: 'Erro antigo' });
     const events = await db.getProductionEvents({ jobId, contentId });
     const library = await db.getContentLibrary();
     if (events.length !== 1 || events[0].message !== 'Worker iniciou') throw new Error('Production event was not persisted');
     if (!library.some((item) => item.id === contentId && item.status === 'queued' && item.title === 'Teste de acompanhamento')) throw new Error('Queued production was not visible in the content library');
     await db.executeQuery('DELETE FROM production_job_events WHERE job_id = ?', [jobId]);
+    await db.executeQuery('DELETE FROM production_job_events WHERE job_id = ?', [olderJobId]);
     await db.executeQuery('DELETE FROM production_jobs WHERE id = ?', [jobId]);
     await db.executeQuery('DELETE FROM productions WHERE id = ?', [contentId]);
     await db.close();
@@ -631,6 +634,12 @@ class SystemTest {
       }
 
       const generator = new AIVideoGenerator({});
+      const slideDir = path.join(dir, 'slides');
+      const generatedSlides = await generator.createSlideStills({ title: 'História para testar a montagem' }, stills, slideDir);
+      const slideMetadata = await sharp(generatedSlides[0]).metadata();
+      if (generatedSlides.length !== stills.length || slideMetadata.width !== 1920 || slideMetadata.height !== 1080) {
+        throw new Error('Server-side slide composition did not create valid 1920x1080 images');
+      }
       const videoPath = path.join(dir, 'out.mp4');
       await generator.renderSlidesToVideo(stills, 6, videoPath);
 

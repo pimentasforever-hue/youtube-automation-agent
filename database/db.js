@@ -790,7 +790,7 @@ class Database {
   async getProductionEvents({ jobId = null, contentId = null, limit = 200 } = {}) {
     let rows = [];
     if (jobId && contentId) {
-      rows = await this.getAllRows('SELECT * FROM production_job_events WHERE job_id = ? OR content_id = ? ORDER BY id DESC LIMIT ?', [jobId, contentId, limit]);
+      rows = await this.getAllRows('SELECT * FROM production_job_events WHERE job_id = ? AND content_id = ? ORDER BY id DESC LIMIT ?', [jobId, contentId, limit]);
     } else if (jobId) {
       rows = await this.getAllRows('SELECT * FROM production_job_events WHERE job_id = ? ORDER BY id DESC LIMIT ?', [jobId, limit]);
     } else if (contentId) {
