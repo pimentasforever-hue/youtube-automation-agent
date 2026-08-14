@@ -12,9 +12,11 @@ const viewTitles = {
   settings: ['Sistema', 'Configurações'],
   detail: ['Biblioteca', 'Assistir conteúdo']
 };
-const statusLabels = { processing: 'Em produção', ready: 'Pronto', scheduled: 'Agendado', published: 'Publicado', simulated: 'Precisa de atenção', failed: 'Falhou' };
+const statusLabels = { processing: 'Em produção', ready: 'Pronto', scheduled: 'Agendado', published: 'Publicado', simulated: 'Precisa de atenção', failed: 'Falhou', replaced: 'Substituído' };
 let contentItems = [];
 let selectedContentId = null;
+let reviewSuggestions = null;
+let productionJobs = [];
 const initialContentId = window.location.pathname.match(/^\/conteudos\/([^/]+)$/)?.[1] || null;
 let initialContentOpened = false;
 
@@ -149,12 +151,50 @@ function openContent(id) {
   $('detail-title').textContent = item.title;
   $('detail-status').textContent = statusLabels[item.status] || item.status;
   $('detail-meta').textContent = `${item.topic} · ${item.duration || 'Duração não informada'} · ${formatDate(item.createdAt)}`;
-  $('video-frame').innerHTML = item.videoUrl ? `<video controls playsinline preload="metadata" src="${text(item.videoUrl)}"${item.thumbnailUrl ? ` poster="${text(item.thumbnailUrl)}"` : ''}></video>` : '<div class="video-empty"><strong>Vídeo ainda indisponível</strong><p>Quando a montagem terminar, o player aparecerá aqui.</p></div>';
+  if (item.status === 'processing') renderProductionPlayer(item);
+  else if (item.videoUrl && ['ready', 'scheduled', 'published'].includes(item.status)) renderCustomPlayer(item);
+  else $('video-frame').innerHTML = `<div class="video-empty"><strong>${['failed', 'simulated'].includes(item.status) ? 'A produção não gerou um vídeo válido' : 'Vídeo ainda indisponível'}</strong><p>${['failed', 'simulated'].includes(item.status) ? 'Use Tentar novamente para reiniciar a produção com o roteiro salvo.' : 'Quando a montagem terminar, o player aparecerá aqui.'}</p></div>`;
   $('edit-content-form').hidden = true;
   $('retry-content-button').hidden = !['failed', 'simulated'].includes(item.status);
   $('retry-content-message').textContent = '';
   showView('detail');
   window.history.replaceState(null, '', `/conteudos/${encodeURIComponent(id)}`);
+}
+
+function formatMediaTime(seconds) {
+  if (!Number.isFinite(seconds)) return '0:00';
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  const secs = Math.floor(seconds % 60);
+  return hours ? `${hours}:${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')}` : `${minutes}:${String(secs).padStart(2, '0')}`;
+}
+
+function renderCustomPlayer(item) {
+  $('video-frame').innerHTML = `<div class="custom-player"><video id="content-video" playsinline preload="metadata" src="${text(item.videoUrl)}"${item.thumbnailUrl ? ` poster="${text(item.thumbnailUrl)}"` : ''}></video><div class="player-controls"><button id="player-toggle" type="button" aria-label="Reproduzir"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 4 13 8-13 8z"/></svg></button><span id="player-time">0:00 / 0:00</span><input id="player-seek" type="range" min="0" max="1000" value="0" aria-label="Posição do vídeo"><button id="player-mute" type="button" aria-label="Silenciar"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 9v6h4l5 4V5L9 9z"/><path d="M17 9c1 1 1 5 0 6"/></svg></button><button id="player-fullscreen" type="button" aria-label="Tela cheia"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3H3v5M16 3h5v5M8 21H3v-5M16 21h5v-5"/></svg></button></div></div>`;
+  const video = $('content-video');
+  const toggle = $('player-toggle');
+  const seek = $('player-seek');
+  const update = () => {
+    seek.value = video.duration ? Math.round((video.currentTime / video.duration) * 1000) : 0;
+    $('player-time').textContent = `${formatMediaTime(video.currentTime)} / ${formatMediaTime(video.duration)}`;
+    toggle.setAttribute('aria-label', video.paused ? 'Reproduzir' : 'Pausar');
+    toggle.classList.toggle('playing', !video.paused);
+  };
+  toggle.addEventListener('click', () => video.paused ? video.play() : video.pause());
+  video.addEventListener('click', () => video.paused ? video.play() : video.pause());
+  video.addEventListener('timeupdate', update);
+  video.addEventListener('durationchange', update);
+  video.addEventListener('play', update);
+  video.addEventListener('pause', update);
+  seek.addEventListener('input', () => { if (video.duration) video.currentTime = (Number(seek.value) / 1000) * video.duration; });
+  $('player-mute').addEventListener('click', () => { video.muted = !video.muted; $('player-mute').classList.toggle('active', video.muted); });
+  $('player-fullscreen').addEventListener('click', () => $('video-frame').requestFullscreen?.());
+}
+
+function renderProductionPlayer(item) {
+  const job = productionJobs.find(entry => `prod_${entry.id}` === item.id || entry.result?.retryOf === item.id);
+  const progress = Math.max(0, Math.min(100, Number(job?.progress) || 0));
+  $('video-frame').innerHTML = `<div class="production-player" role="status" aria-live="polite" aria-atomic="true"><div class="production-player-orbit" aria-hidden="true"></div><strong>${progress}%</strong><span>${text(job?.message || 'Preparando a produção')}</span><div class="production-player-track"><i style="transform:scaleX(${progress / 100})"></i></div><small>O player será liberado quando o arquivo passar pela validação final.</small></div>`;
 }
 
 async function retryContent(id = selectedContentId, sourceButton = null) {
@@ -211,6 +251,7 @@ function updateConnections(data) {
 }
 
 function updateJobs(jobs) {
+  productionJobs = Array.isArray(jobs) ? jobs : [];
   const latest = (jobs || [])[0];
   const active = (jobs || []).find((job) => !['completed', 'failed'].includes(job.stage));
   const overviewJob = active || latest;
@@ -242,6 +283,10 @@ function updateJobs(jobs) {
   dock.querySelector('strong').textContent = shown.message;
   dock.querySelector('.production-dock-meta').textContent = `${shown.progress}% · ${shown.stage === 'completed' ? 'Concluído' : shown.stage === 'failed' ? 'Falhou' : 'Em andamento'}`;
   dock.querySelector('.production-dock-track i').style.width = `${shown.progress}%`;
+  if (selectedContentId && document.querySelector('.app-view[data-view="detail"].active')) {
+    const item = contentItems.find(content => content.id === selectedContentId);
+    if (item?.status === 'processing') renderProductionPlayer(item);
+  }
 }
 
 async function loadJobs() {
@@ -251,6 +296,22 @@ async function loadJobs() {
   } catch (_error) {
     // The full dashboard refresh handles connection state.
   }
+}
+
+function connectProductionEvents() {
+  if (!window.EventSource) return;
+  const source = new window.EventSource('/production-events');
+  source.addEventListener('snapshot', (event) => {
+    try { updateJobs(JSON.parse(event.data)); } catch (_error) { /* Polling remains available. */ }
+  });
+  source.addEventListener('production', (event) => {
+    try {
+      const job = JSON.parse(event.data);
+      const jobs = [job, ...productionJobs.filter(item => item.id !== job.id)].sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt));
+      updateJobs(jobs);
+      if (['completed', 'failed'].includes(job.stage)) loadDashboard();
+    } catch (_error) { /* Polling remains available. */ }
+  });
 }
 
 function updateContents(items) {
@@ -373,6 +434,19 @@ $('suggest-scenes-button').addEventListener('click', async () => {
   }
 });
 $('close-script-review').addEventListener('click', () => { $('script-review').hidden = true; });
+$('apply-review-suggestions').addEventListener('click', () => {
+  if (!reviewSuggestions) return;
+  $('style').value = reviewSuggestions.style;
+  $('target-minutes').value = reviewSuggestions.targetMinutes;
+  $('scene-count').value = reviewSuggestions.sceneCount;
+  $('privacy').value = reviewSuggestions.privacy;
+  $('narration').checked = reviewSuggestions.narration !== false;
+  $('captions').checked = reviewSuggestions.captions !== false;
+  $('auto-publish').checked = reviewSuggestions.autoPublish === true;
+  updateScriptCounter();
+  $('form-message').className = 'form-message success';
+  $('form-message').textContent = 'As sugestões foram aplicadas. Revise os campos antes de iniciar a produção.';
+});
 $('review-script-button').addEventListener('click', async () => {
   const button = $('review-script-button');
   const script = $('script-input').value.trim();
@@ -388,10 +462,16 @@ $('review-script-button').addEventListener('click', async () => {
   message.className = 'form-message';
   message.textContent = 'A IA está analisando o roteiro.';
   try {
-    const response = await request('/api/review-script', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ script }) });
+    const response = await request('/api/review-script', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ script, style: $('style').value, targetMinutes: Number($('target-minutes').value), sceneCount: Number($('scene-count').value), privacy: $('privacy').value, narration: $('narration').checked, captions: $('captions').checked, autoPublish: $('auto-publish').checked }) });
     const result = await response.json();
     if (!response.ok) throw new Error(result.error || 'Não foi possível revisar o roteiro.');
     $('script-review-content').textContent = result.report;
+    reviewSuggestions = result.suggestions || null;
+    if (reviewSuggestions) {
+      const styleNames = { story: 'História narrada', educational: 'Estudo bíblico', explainer: 'Explicação', list: 'Lista temática' };
+      const privacyNames = { private: 'Privado', unlisted: 'Não listado', public: 'Público' };
+      $('review-suggestions').innerHTML = `<span><small>Formato</small><strong>${text(styleNames[reviewSuggestions.style] || reviewSuggestions.style)}</strong></span><span><small>Duração</small><strong>${text(reviewSuggestions.targetMinutes)} min</strong></span><span><small>Cenas</small><strong>${text(reviewSuggestions.sceneCount)}</strong></span><span><small>Visibilidade</small><strong>${text(privacyNames[reviewSuggestions.privacy] || reviewSuggestions.privacy)}</strong></span><span><small>Narração</small><strong>${reviewSuggestions.narration === false ? 'Não' : 'Sim'}</strong></span><span><small>Legendas</small><strong>${reviewSuggestions.captions === false ? 'Não' : 'Sim'}</strong></span>`;
+    }
     $('script-review').hidden = false;
     message.className = 'form-message success';
     message.textContent = result.limited
@@ -483,5 +563,6 @@ $('account-form').addEventListener('submit', async (event) => {
 showView(initialContentId ? 'detail' : window.location.hash.slice(1) || 'overview', false);
 loadDashboard();
 loadSettings();
+connectProductionEvents();
 setInterval(loadDashboard, 30000);
-setInterval(loadJobs, 2000);
+setInterval(loadJobs, 10000);

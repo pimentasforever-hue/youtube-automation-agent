@@ -1,5 +1,6 @@
 const { Logger } = require('../utils/logger');
 const { AITextService } = require('../utils/ai-text-service');
+const { sanitizeText } = require('../utils/text-sanitizer');
 
 class SEOOptimizerAgent {
   constructor(db, credentials) {
@@ -47,6 +48,9 @@ class SEOOptimizerAgent {
         // Extract and optimize tags
         tags = await this.generateTags(script, strategy);
       }
+      title = sanitizeText(title);
+      description = sanitizeText(description);
+      tags = tags.map(sanitizeText);
       
       // Generate hashtags
       const hashtags = await this.generateHashtags(strategy);

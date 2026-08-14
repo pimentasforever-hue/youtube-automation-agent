@@ -130,6 +130,11 @@ main { width: min(1320px,100%); margin: 0 auto; padding: 36px clamp(20px,4vw,48p
 .script-review-heading h3 { margin: 0; font-size: 1rem; }
 .script-review-content { white-space: pre-wrap; }
 #script-review-content { margin-top: 14px; color: var(--text); font-size: .86rem; line-height: 1.65; white-space: pre-wrap; }
+.review-suggestions { margin: 16px 0; display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 8px; }
+.review-suggestions span { min-width: 0; padding: 11px 12px; border: 1px solid rgba(0,113,227,.16); border-radius: 11px; background: rgba(255,255,255,.45); }
+.review-suggestions small, .review-suggestions strong { display: block; }
+.review-suggestions small { margin-bottom: 4px; color: var(--muted); font-size: .68rem; }
+.review-suggestions strong { overflow-wrap: anywhere; font-size: .8rem; }
 .production-dock::after { content: 'Ver detalhes'; display: block; margin-top: 10px; color: var(--blue); font-size: .72rem; font-weight: 700; }
 .muted-copy { color: var(--muted); }
 .option-grid { display: flex; flex-wrap: wrap; gap: 12px 24px; margin: 18px 0; }
@@ -149,6 +154,31 @@ main { width: min(1320px,100%); margin: 0 auto; padding: 36px clamp(20px,4vw,48p
 .confirm-dialog p:not(.eyebrow) { color: var(--muted); line-height: 1.55; }
 .video-frame { aspect-ratio: 16 / 9; overflow: hidden; border-radius: 18px; background: #090909; color: #fff; }
 .video-frame video { width: 100%; height: 100%; object-fit: contain; }
+.custom-player { position: relative; width: 100%; height: 100%; }
+.custom-player video { display: block; cursor: pointer; }
+.player-controls { position: absolute; right: 0; bottom: 0; left: 0; min-height: 64px; padding: 12px 14px; display: grid; grid-template-columns: 44px auto minmax(80px,1fr) 44px 44px; align-items: center; gap: 10px; background: linear-gradient(transparent,rgba(0,0,0,.88)); }
+.player-controls button { width: 44px; height: 44px; display: grid; place-items: center; color: #fff; border: 0; border-radius: 50%; background: rgba(255,255,255,.1); }
+.player-controls button:hover, .player-controls button:focus-visible { background: rgba(255,255,255,.2); }
+.player-controls svg { width: 21px; height: 21px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+#player-toggle svg { fill: currentColor; stroke: none; }
+#player-time { font-size: .74rem; font-variant-numeric: tabular-nums; white-space: nowrap; }
+#player-seek { min-height: 24px; padding: 0; accent-color: var(--blue); }
+.production-player { width: 100%; height: 100%; padding: 32px; display: grid; place-content: center; justify-items: center; text-align: center; background: radial-gradient(circle at 50% 35%,rgba(0,113,227,.18),transparent 42%),#090909; }
+.production-player-orbit { width: 54px; height: 54px; margin-bottom: 18px; border: 2px solid rgba(255,255,255,.12); border-top-color: var(--blue); border-radius: 50%; animation: production-spin 1s linear infinite; }
+.production-player strong { font-size: clamp(2.6rem,7vw,5.2rem); font-variant-numeric: tabular-nums; letter-spacing: -.05em; }
+.production-player span { margin-top: 6px; color: rgba(255,255,255,.8); }
+.production-player small { margin-top: 14px; color: rgba(255,255,255,.5); }
+.production-player-track { width: min(480px,70vw); height: 6px; margin-top: 20px; overflow: hidden; border-radius: 999px; background: rgba(255,255,255,.12); }
+.production-player-track i { display: block; width: 100%; height: 100%; transform-origin: left; border-radius: inherit; background: var(--blue); transition: transform .35s ease; }
+@keyframes production-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .production-player-orbit { animation: none; border-color: var(--blue); } }
+@media (max-width: 640px) {
+  .review-suggestions { grid-template-columns: repeat(2,minmax(0,1fr)); }
+  .player-controls { grid-template-columns: 44px minmax(0,1fr) 44px 44px; gap: 6px; padding: 8px; }
+  #player-time { display: none; }
+  .production-player { padding: 20px; }
+  .production-player-track { width: min(100%,320px); }
+}
 .video-empty { height: 100%; display: grid; place-content: center; text-align: center; padding: 24px; }
 .video-empty p { color: rgba(255,255,255,.65); }
 .connection-card { grid-column: span 2; }

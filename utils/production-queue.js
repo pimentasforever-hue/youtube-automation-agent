@@ -49,7 +49,8 @@ class ProductionQueue {
         job.data.jobId,
         finalAttempt ? 'failed' : 'retrying',
         finalAttempt ? 100 : 5,
-        finalAttempt ? 'A produção falhou após novas tentativas.' : 'A produção será retomada automaticamente.'
+        finalAttempt ? 'A produção falhou após novas tentativas.' : 'A produção será retomada automaticamente.',
+        job.data.options?.retryOf ? { retryOf: job.data.options.retryOf } : null
       );
       this.logger.error(`Production queue job ${job.id} failed:`, error);
       });

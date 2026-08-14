@@ -29,6 +29,7 @@ class YouTubeAutomationAgent {
     this.isInitialized = false;
     this.loginAttempts = new Map();
     this.productionJobs = new Map();
+    this.productionClients = new Set();
     this.googleAuthStates = new Map();
     this.productionQueue = null;
   }
@@ -260,11 +261,11 @@ class YouTubeAutomationAgent {
       autoPublish: body.autoPublish === true
     };
 
-    if (!Number.isInteger(value.targetMinutes) || value.targetMinutes < 1 || value.targetMinutes > 30) {
-      return { valid: false, status: 400, error: 'targetMinutes must be an integer between 1 and 30' };
+    if (!Number.isInteger(value.targetMinutes) || value.targetMinutes < 1 || value.targetMinutes > 90) {
+      return { valid: false, status: 400, error: 'A duração deve ser um número inteiro entre 1 e 90 minutos.' };
     }
-    if (!Number.isInteger(value.sceneCount) || value.sceneCount < 3 || value.sceneCount > 24) {
-      return { valid: false, status: 400, error: 'sceneCount must be an integer between 3 and 24' };
+    if (!Number.isInteger(value.sceneCount) || value.sceneCount < 3 || value.sceneCount > 180) {
+      return { valid: false, status: 400, error: 'A quantidade de cenas deve estar entre 3 e 180.' };
     }
     if (!['private', 'unlisted', 'public'].includes(value.privacy)) {
       return { valid: false, status: 400, error: 'privacy must be private, unlisted, or public' };
@@ -495,24 +496,33 @@ class YouTubeAutomationAgent {
         const sample = script.length <= 120000
           ? script
           : `${script.slice(0, 40000)}\n\n[MEIO DO ROTEIRO]\n${script.slice(Math.floor(script.length / 2) - 20000, Math.floor(script.length / 2) + 20000)}\n\n[FINAL DO ROTEIRO]\n${script.slice(-40000)}`;
-        const prompt = `Você é um editor profissional de roteiros bíblicos para YouTube. Revise o texto abaixo em português do Brasil. Analise fidelidade e coerência bíblica, clareza, estrutura narrativa, ritmo para narração, repetições, linguagem, retenção e possíveis afirmações que precisam de verificação. Não reescreva o roteiro inteiro. Entregue um relatório prático com: Resumo, Pontos fortes, Correções prioritárias e Sugestões de melhoria. Informe claramente quando a análise tiver sido feita por amostragem. Não use travessão.\n\nTamanho total: ${script.length} caracteres.\n\nROTEIRO:\n${sample}`;
+        const words = script.split(/\s+/).filter(Boolean).length;
+        const estimatedMinutes = Math.min(90, Math.max(1, Math.round(words / 140)));
+        const fallbackSuggestions = { style: 'story', targetMinutes: estimatedMinutes, sceneCount: Math.min(180, Math.max(3, Math.round(estimatedMinutes * 1.7))), privacy: 'private', narration: true, captions: true, autoPublish: false };
+        const prompt = `Você é um editor profissional de roteiros bíblicos para YouTube. Revise o texto abaixo em português do Brasil. Analise fidelidade e coerência bíblica, clareza, estrutura narrativa, ritmo para narração, repetições, linguagem, retenção e possíveis afirmações que precisam de verificação. Não reescreva o roteiro inteiro. Sugira também a melhor configuração para todos os campos de produção. Responda somente em JSON válido com esta estrutura: {"report":"relatório com Resumo, Pontos fortes, Correções prioritárias e Sugestões de melhoria","suggestions":{"style":"story, educational, explainer ou list","targetMinutes":1,"sceneCount":3,"privacy":"private, unlisted ou public","narration":true,"captions":true,"autoPublish":false}}. A duração deve ficar entre 1 e 90 minutos. A quantidade de cenas deve ficar entre 3 e 180. Informe no relatório quando a análise tiver sido feita por amostragem. Não use travessão.\n\nTamanho total: ${script.length} caracteres.\n\nROTEIRO:\n${sample}`;
         try {
-          let report;
+          let answer;
           try {
-            report = await reviewer.generateText(prompt, { maxTokens: 2400, temperature: 0.3 });
+            answer = await reviewer.generateText(prompt, { maxTokens: 2600, temperature: 0.3 });
           } catch (_firstAttemptError) {
             await new Promise((resolve) => setTimeout(resolve, 1200));
-            report = await reviewer.generateText(prompt, { maxTokens: 2400, temperature: 0.3 });
+            answer = await reviewer.generateText(prompt, { maxTokens: 2600, temperature: 0.3 });
           }
-          return res.json({ success: true, report: String(report).replace(/[\u2013\u2014]/g, ','), sampled: script.length > 120000, reviewedCharacters: sample.length, totalCharacters: script.length });
+          const jsonText = String(answer).match(/\{[\s\S]*\}/)?.[0];
+          const parsed = jsonText ? JSON.parse(jsonText) : { report: String(answer), suggestions: fallbackSuggestions };
+          const suggestions = { ...fallbackSuggestions, ...(parsed.suggestions || {}) };
+          suggestions.targetMinutes = Math.min(90, Math.max(1, Math.round(Number(suggestions.targetMinutes) || estimatedMinutes)));
+          suggestions.sceneCount = Math.min(180, Math.max(3, Math.round(Number(suggestions.sceneCount) || fallbackSuggestions.sceneCount)));
+          if (!['story', 'educational', 'explainer', 'list'].includes(suggestions.style)) suggestions.style = 'story';
+          if (!['private', 'unlisted', 'public'].includes(suggestions.privacy)) suggestions.privacy = 'private';
+          return res.json({ success: true, report: String(parsed.report || answer).replace(/[\u2013\u2014]/g, ','), suggestions, sampled: script.length > 120000, reviewedCharacters: sample.length, totalCharacters: script.length });
         } catch (_aiError) {
-          const words = script.split(/\s+/).filter(Boolean).length;
           const paragraphs = script.split(/\n\s*\n/).filter((part) => part.trim()).length;
           const minutes = Math.max(1, Math.round(words / 140));
           const paragraphLabel = paragraphs === 1 ? 'parágrafo' : 'parágrafos';
           const minuteLabel = minutes === 1 ? 'minuto' : 'minutos';
           const report = `Resumo\nO roteiro tem ${words.toLocaleString('pt-BR')} palavras, ${paragraphs} ${paragraphLabel} e cerca de ${minutes} ${minuteLabel} de narração.\n\nPontos fortes\nO texto foi recebido corretamente e está pronto para uma revisão editorial completa.\n\nCorreções prioritárias\nO serviço de revisão aprofundada está temporariamente ocupado. A fidelidade bíblica, as repetições e a coerência entre trechos ainda precisam ser verificadas pela IA.\n\nSugestões de melhoria\nMantenha parágrafos curtos, apresente o conflito nos primeiros segundos e encerre cada bloco com uma transição clara para a próxima cena.`;
-          return res.json({ success: true, report, sampled: script.length > 120000, reviewedCharacters: sample.length, totalCharacters: script.length, limited: true });
+          return res.json({ success: true, report, suggestions: fallbackSuggestions, sampled: script.length > 120000, reviewedCharacters: sample.length, totalCharacters: script.length, limited: true });
         }
       } catch (error) {
         return res.status(500).json({ success: false, error: error.message });
@@ -522,11 +532,11 @@ class YouTubeAutomationAgent {
     this.app.post('/api/suggest-scenes', this.requireAuth(), async (req, res) => {
       try {
         const script = typeof req.body?.script === 'string' ? req.body.script.trim() : '';
-        const targetMinutes = Math.min(30, Math.max(1, Number(req.body?.targetMinutes) || 8));
+        const targetMinutes = Math.min(90, Math.max(1, Number(req.body?.targetMinutes) || 8));
         const style = ['story', 'educational', 'explainer', 'list'].includes(req.body?.style) ? req.body.style : 'story';
         if (script.length > 5500000) return res.status(413).json({ success: false, error: 'O roteiro ultrapassa o limite de 5.500.000 caracteres.' });
         const paceByStyle = { story: 1.7, educational: 1.35, explainer: 1.5, list: 1.8 };
-        const fallbackCount = Math.min(24, Math.max(3, Math.round(targetMinutes * paceByStyle[style])));
+        const fallbackCount = Math.min(180, Math.max(3, Math.round(targetMinutes * paceByStyle[style])));
         const reviewer = this.agents.scriptWriter.aiTextService;
         if (!reviewer?.isAvailable()) {
           const seconds = Math.round((targetMinutes * 60) / fallbackCount);
@@ -534,10 +544,10 @@ class YouTubeAutomationAgent {
         }
         try {
           const sample = script.length > 12000 ? `${script.slice(0, 6000)}\n\n[FINAL]\n${script.slice(-6000)}` : script;
-          const answer = await reviewer.generateText(`Você é um diretor de vídeos para YouTube. Recomende uma quantidade de cenas entre 3 e 24 para um vídeo de ${targetMinutes} minutos no formato ${style}. O objetivo é manter ritmo visual, clareza e retenção sem criar cortes excessivos. Quantidade calculada como referência: ${fallbackCount}. Considere o roteiro quando ele estiver disponível. Responda somente em JSON válido com as chaves sceneCount, que deve ser um número inteiro, e reason, com uma explicação curta em português do Brasil. Não use travessão.\n\nROTEIRO:\n${sample || 'Roteiro ainda não informado.'}`, { maxTokens: 300, temperature: 0.2 });
+          const answer = await reviewer.generateText(`Você é um diretor de vídeos para YouTube. Recomende uma quantidade de cenas entre 3 e 180 para um vídeo de ${targetMinutes} minutos no formato ${style}. O objetivo é manter ritmo visual, clareza e retenção sem criar cortes excessivos. Quantidade calculada como referência: ${fallbackCount}. Considere o roteiro quando ele estiver disponível. Responda somente em JSON válido com as chaves sceneCount, que deve ser um número inteiro, e reason, com uma explicação curta em português do Brasil. Não use travessão.\n\nROTEIRO:\n${sample || 'Roteiro ainda não informado.'}`, { maxTokens: 300, temperature: 0.2 });
           const jsonText = String(answer).match(/\{[\s\S]*\}/)?.[0];
           const parsed = jsonText ? JSON.parse(jsonText) : {};
-          const sceneCount = Math.min(24, Math.max(3, Math.round(Number(parsed.sceneCount) || fallbackCount)));
+          const sceneCount = Math.min(180, Math.max(3, Math.round(Number(parsed.sceneCount) || fallbackCount)));
           const seconds = Math.round((targetMinutes * 60) / sceneCount);
           const reason = typeof parsed.reason === 'string' && parsed.reason.trim()
             ? parsed.reason.trim().replace(/[\u2013\u2014]/g, ',')
@@ -565,6 +575,21 @@ class YouTubeAutomationAgent {
       } catch (error) {
         res.status(500).json({ error: error.message });
       }
+    });
+
+    this.app.get('/production-events', this.requireAuth(), async (req, res) => {
+      res.setHeader('Content-Type', 'text/event-stream');
+      res.setHeader('Cache-Control', 'no-cache, no-transform');
+      res.setHeader('Connection', 'keep-alive');
+      res.flushHeaders?.();
+      this.productionClients.add(res);
+      const jobs = await this.db.getProductionJobs(20).catch(() => []);
+      res.write(`event: snapshot\ndata: ${JSON.stringify(jobs)}\n\n`);
+      const heartbeat = setInterval(() => res.write(': conectado\n\n'), 20000);
+      req.on('close', () => {
+        clearInterval(heartbeat);
+        this.productionClients.delete(res);
+      });
     });
 
     // Get analytics
@@ -625,7 +650,8 @@ class YouTubeAutomationAgent {
           autoPublish: false,
           retryOf: content.id
         };
-        this.updateProductionJob(jobId, 'queued', 3, 'Nova tentativa adicionada à fila');
+        this.updateProductionJob(jobId, 'queued', 3, 'Nova tentativa adicionada à fila', { retryOf: content.id });
+        await this.db.setProductionStatus(content.id, 'processing');
         const queued = await this.productionQueue.add(jobId, options);
         return res.status(202).json({ success: true, jobId, queue: queued.mode });
       } catch (error) {
@@ -730,9 +756,14 @@ class YouTubeAutomationAgent {
 
   updateProductionJob(id, stage, progress, message, result = null) {
     const existing = this.productionJobs.get(id) || { id, startedAt: new Date().toISOString() };
-    const job = { ...existing, stage, progress, message, result, updatedAt: new Date().toISOString() };
+    const job = { ...existing, stage, progress, message, result: result ?? existing.result ?? null, updatedAt: new Date().toISOString() };
     this.productionJobs.set(id, job);
     this.db.saveProductionJob(job).catch((error) => this.logger.warn(`Could not persist production job ${id}: ${error.message}`));
+    if (result?.retryOf && ['completed', 'failed'].includes(stage)) {
+      this.db.setProductionStatus(result.retryOf, stage === 'completed' ? 'replaced' : 'simulated').catch(() => {});
+    }
+    const event = `event: production\ndata: ${JSON.stringify(job)}\n\n`;
+    for (const client of this.productionClients) client.write(event);
   }
 
   async generateContent(topic = null, style = null, length = 'medium', options = {}, jobId = null) {
@@ -792,7 +823,8 @@ class YouTubeAutomationAgent {
       contentId,
       title: script.title,
       status: productionData.status,
-      scheduledFor: scheduleEntry ? scheduleEntry.publishTime : null
+      scheduledFor: scheduleEntry ? scheduleEntry.publishTime : null,
+      retryOf: options.retryOf || null
     };
   }
 

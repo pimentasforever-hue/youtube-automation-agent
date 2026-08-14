@@ -1,6 +1,7 @@
 const sqlite3 = require('sqlite3').verbose();
 const { Pool } = require('pg');
 const path = require('path');
+const { sanitizeText } = require('../utils/text-sanitizer');
 const fs = require('fs').promises;
 const { Logger } = require('../utils/logger');
 
@@ -398,6 +399,10 @@ class Database {
     );
   }
 
+  async setProductionStatus(contentId, status) {
+    await this.executeQuery('UPDATE productions SET status = ? WHERE id = ?', [status, contentId]);
+  }
+
   async getProductionPipeline() {
     const rows = await this.getAllRows(
       'SELECT * FROM productions ORDER BY priority DESC, created_at ASC'
@@ -448,8 +453,8 @@ class Database {
 
       return {
         id: row.id,
-        title,
-        topic: row.topic,
+        title: sanitizeText(title),
+        topic: sanitizeText(row.topic),
         status: row.status,
         duration: row.estimated_duration,
         scheduledFor: row.scheduled_publish_time,
@@ -496,6 +501,8 @@ class Database {
   }
 
   async updateContentMetadata(contentId, title, topic) {
+    title = sanitizeText(title);
+    topic = sanitizeText(topic);
     const production = await this.getRow('SELECT script_id, strategy_id FROM productions WHERE id = ?', [contentId]);
     if (!production) return false;
     if (production.script_id) await this.executeQuery('UPDATE scripts SET title = ? WHERE id = ?', [title, production.script_id]);

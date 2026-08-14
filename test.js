@@ -211,6 +211,11 @@ class SystemTest {
       throw new Error('Overlong style was not rejected');
     }
 
+    const longVideo = agent.validateGenerateRequestBody({ targetMinutes: 90, sceneCount: 180 });
+    if (!longVideo.valid) throw new Error(`90 minute production was rejected: ${longVideo.error}`);
+    if (agent.validateGenerateRequestBody({ targetMinutes: 91, sceneCount: 180 }).valid) throw new Error('Duration above 90 minutes was accepted');
+    if (agent.validateGenerateRequestBody({ targetMinutes: 90, sceneCount: 181 }).valid) throw new Error('Scene count above 180 was accepted');
+
     const previousKey = process.env.API_KEY;
     process.env.API_KEY = 'test-secret';
     const middleware = agent.requireAPIKey();

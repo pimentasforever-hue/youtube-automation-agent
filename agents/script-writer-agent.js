@@ -1,5 +1,6 @@
 const { Logger } = require('../utils/logger');
 const { AITextService } = require('../utils/ai-text-service');
+const { sanitizeObject, sanitizeText } = require('../utils/text-sanitizer');
 
 class ScriptWriterAgent {
   constructor(db, credentials) {
@@ -52,6 +53,7 @@ class ScriptWriterAgent {
       const template = this.templates[strategy.contentType.toLowerCase()] || this.templates.explainer;
       const aiScript = await this.generateScriptWithAI(strategy, template, options);
       if (aiScript) {
+        Object.assign(aiScript, sanitizeObject(aiScript));
         aiScript.fullScript = this.formatFullScript(aiScript);
         await this.db.saveScript(aiScript);
         this.logger.info(`Script generated with AI provider: ${aiScript.title}`);
@@ -67,7 +69,7 @@ class ScriptWriterAgent {
       const cta = await this.generateCTA(strategy);
 
       // Assemble complete script
-      const script = {
+      const script = sanitizeObject({
         title: await this.generateTitle(strategy),
         hook,
         introduction,
@@ -83,7 +85,7 @@ class ScriptWriterAgent {
           generatedAt: new Date().toISOString(),
           version: '1.0'
         }
-      };
+      });
 
       // Format for readability
       script.fullScript = this.formatFullScript(script);
@@ -101,7 +103,7 @@ class ScriptWriterAgent {
 
   async createScriptFromText(text, strategy, options = {}) {
     const paragraphs = String(text).split(/\n{2,}/).map((part) => part.trim()).filter(Boolean);
-    const titleLine = paragraphs[0]?.split(/\r?\n/)[0]?.replace(/^#+\s*/, '').trim() || strategy.topic;
+    const titleLine = sanitizeText(paragraphs[0]?.split(/\r?\n/)[0]?.replace(/^#+\s*/, '').trim() || strategy.topic);
     const words = String(text).trim().split(/\s+/).filter(Boolean).length;
     const script = {
       title: titleLine.slice(0, 100),
@@ -113,7 +115,7 @@ class ScriptWriterAgent {
       },
       conclusion: { type: 'provided', text: '' },
       callToAction: { type: 'provided', text: '' },
-      fullScript: String(text).trim(),
+      fullScript: sanitizeText(String(text).trim()),
       duration: `${Math.max(1, Math.round(words / 140))} minutes`,
       tone: strategy.contentType || 'narrative',
       pacing: 'provided',

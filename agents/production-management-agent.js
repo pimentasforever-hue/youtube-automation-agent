@@ -314,7 +314,9 @@ class ProductionManagementAgent {
       const { strategy, script } = productionData;
       
       // Generate visual assets using DALL-E
-      const visualPrompts = this.createVisualPromptsFromScript(script).slice(0, productionData.settings?.sceneCount || 8);
+      const requestedScenes = Math.min(180, Math.max(3, Number(productionData.settings?.sceneCount) || 8));
+      const basePrompts = this.createVisualPromptsFromScript(script);
+      const visualPrompts = Array.from({ length: requestedScenes }, (_, index) => `${basePrompts[index % basePrompts.length]}, cena ${index + 1} de ${requestedScenes}, composição visual distinta`);
       const visualAssets = [];
       
       for (const prompt of visualPrompts) {
@@ -666,7 +668,7 @@ class ProductionManagementAgent {
       prompts.push('ethereal dreamscape, mystical storytelling, creative visualization');
     }
     
-    return prompts.slice(0, 5); // Limit to 5 for cost control
+    return prompts;
   }
 
   // Fallback simulation methods
