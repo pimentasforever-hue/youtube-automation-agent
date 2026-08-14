@@ -6,6 +6,7 @@ const { pathToFileURL } = require('url');
 const axios = require('axios');
 const { Logger } = require('./logger');
 const { runFFmpeg, checkFFmpeg, ffmpegInstallHint } = require('./ffmpeg');
+const { GeminiClientPool, geminiKeys } = require('./gemini-client-pool');
 
 class AIVideoGenerator {
   constructor(credentials) {
@@ -33,8 +34,8 @@ class AIVideoGenerator {
     const geminiKey = credentials.gemini?.apiKey || process.env.GEMINI_API_KEY;
     if (geminiKey) {
       try {
-        const { GoogleGenAI } = require('@google/genai');
-        this.gemini = new GoogleGenAI({ apiKey: geminiKey });
+        this.geminiPool = new GeminiClientPool(geminiKeys(geminiKey), this.logger);
+        this.gemini = this.geminiPool.clients[0];
         this.logger.info('Gemini media service initialized (images + TTS)');
       } catch (error) {
         this.logger.warn('Failed to initialize Gemini media service:', error.message);
@@ -134,7 +135,7 @@ class AIVideoGenerator {
     const model = process.env.GEMINI_TTS_MODEL || 'gemini-3.1-flash-tts-preview';
     const voiceName = process.env.GEMINI_TTS_VOICE || 'Kore';
 
-    const response = await this.gemini.models.generateContent({
+    const response = await this.geminiPool.run((client) => client.models.generateContent({
       model,
       contents: [{ parts: [{ text }] }],
       config: {
@@ -145,7 +146,7 @@ class AIVideoGenerator {
           }
         }
       }
-    });
+    }));
 
     const audioData = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
     if (!audioData) {
@@ -223,10 +224,10 @@ class AIVideoGenerator {
   async generateGeminiImage(prompt, imagePath) {
     const model = process.env.GEMINI_IMAGE_MODEL || 'gemini-3.1-flash-image';
 
-    const response = await this.gemini.models.generateContent({
+    const response = await this.geminiPool.run((client) => client.models.generateContent({
       model,
       contents: prompt
-    });
+    }));
 
     const parts = response.candidates?.[0]?.content?.parts || [];
     const imagePart = parts.find(part => part.inlineData?.data);
@@ -571,7 +572,7 @@ class AIVideoGenerator {
   generateContentSlides(script, visualAssets) {
     const slides = [];
     
-    if (script.mainContent && script.mainContent.sections) {
+    if (Array.isArray(script.mainContent?.sections)) {
       script.mainContent.sections.forEach((section, index) => {
         const assetIndex = Math.min(index + 1, visualAssets.length - 1);
         
@@ -619,17 +620,17 @@ class AIVideoGenerator {
       totalWords += (script.introduction.topicIntro || '').split(' ').length;
     }
     
-    if (script.mainContent && script.mainContent.sections) {
+    if (Array.isArray(script.mainContent?.sections)) {
       script.mainContent.sections.forEach(section => {
         if (typeof section.content === 'string') {
           totalWords += section.content.split(' ').length;
         }
-        if (section.items) {
+        if (Array.isArray(section.items)) {
           section.items.forEach(item => {
             totalWords += (item.title + ' ' + item.description).split(' ').length;
           });
         }
-        if (section.steps) {
+        if (Array.isArray(section.steps)) {
           section.steps.forEach(step => {
             totalWords += (step.title + ' ' + step.description).split(' ').length;
           });
@@ -637,7 +638,7 @@ class AIVideoGenerator {
       });
     }
     
-    if (script.conclusion) {
+    if (typeof script.conclusion?.finalThought === 'string') {
       totalWords += script.conclusion.finalThought.split(' ').length;
     }
     

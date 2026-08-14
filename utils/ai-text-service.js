@@ -1,5 +1,6 @@
 const OpenAI = require('openai');
 const { Logger } = require('./logger');
+const { GeminiClientPool, geminiKeys } = require('./gemini-client-pool');
 
 const PROVIDERS = {
   openai: {
@@ -83,8 +84,8 @@ class AITextService {
 
   _initGemini(apiKey, model) {
     try {
-      const { GoogleGenAI } = require('@google/genai');
-      this.gemini = new GoogleGenAI({ apiKey });
+      this.geminiPool = new GeminiClientPool(geminiKeys(apiKey), this.logger);
+      this.gemini = this.geminiPool.clients[0];
       this.model = model || 'gemini-3.5-flash';
       this.providerName = 'Google Gemini';
       this.logger.info(`Gemini initialized (model: ${this.model})`);
@@ -98,12 +99,12 @@ class AITextService {
     const maxTokens = options.maxTokens || 2048;
     const temperature = options.temperature ?? 0.7;
 
-    if (this.gemini) {
-      const response = await this.gemini.models.generateContent({
+    if (this.geminiPool?.available) {
+      const response = await this.geminiPool.run((client) => client.models.generateContent({
         model,
         contents: prompt,
         config: { maxOutputTokens: maxTokens, temperature },
-      });
+      }));
       return response.text;
     }
 
