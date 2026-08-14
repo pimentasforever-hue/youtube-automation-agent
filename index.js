@@ -480,7 +480,8 @@ class YouTubeAutomationAgent {
       const result = {
         youtube: { connected: false, authorized: Boolean(this.credentials.tokens?.youtube) },
         ai: { connected: this.credentials.hasAITextProvider(), provider: process.env.GEMINI_API_KEY ? 'Gemini' : process.env.OPENAI_API_KEY ? 'OpenAI' : null },
-        storage: { connected: Boolean(process.env.R2_ACCOUNT_ID && process.env.R2_ACCESS_KEY_ID && process.env.R2_SECRET_ACCESS_KEY && process.env.R2_BUCKET), provider: process.env.R2_BUCKET ? 'Cloudflare R2' : 'Railway Volume', bucket: process.env.R2_BUCKET || null }
+        storage: { connected: Boolean(process.env.R2_ACCOUNT_ID && process.env.R2_ACCESS_KEY_ID && process.env.R2_SECRET_ACCESS_KEY && process.env.R2_BUCKET), provider: process.env.R2_BUCKET ? 'Cloudflare R2' : 'Railway Volume', bucket: process.env.R2_BUCKET || null },
+        database: { connected: true, provider: this.db.isPostgres ? 'PostgreSQL' : 'SQLite', managedBy: this.db.isPostgres ? 'Railway' : 'Aplicação' }
       };
       try {
         const youtube = this.credentials.getYouTubeClient();
