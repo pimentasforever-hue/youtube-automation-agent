@@ -4,6 +4,7 @@ const fs = require('fs').promises;
 const path = require('path');
 const { pathToFileURL } = require('url');
 const axios = require('axios');
+const sharp = require('sharp');
 const { Logger } = require('./logger');
 const { runFFmpeg, checkFFmpeg, ffmpegInstallHint } = require('./ffmpeg');
 const { GeminiClientPool, geminiKeys } = require('./gemini-client-pool');
@@ -297,7 +298,7 @@ class AIVideoGenerator {
       const buffer = Buffer.from(base64, 'base64');
       if (!buffer.length) throw new Error('O Cloudflare Workers AI retornou uma imagem vazia.');
 
-      await fs.writeFile(imagePath, buffer);
+      await sharp(buffer).png().toFile(imagePath);
       return imagePath;
     } catch (error) {
       throw new Error(this.formatCloudflareImageError(error));

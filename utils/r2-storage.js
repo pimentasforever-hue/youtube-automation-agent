@@ -20,7 +20,13 @@ class R2Storage {
   async upload(filePath, key, contentType) {
     if (!this.enabled || !filePath) return null;
     await this.validateUploadFile(filePath, contentType);
-    const response = await this.client.send(new PutObjectCommand({ Bucket: this.bucket, Key: key, Body: fs.createReadStream(filePath), ContentType: contentType }));
+    const response = await this.client.send(new PutObjectCommand({
+      Bucket: this.bucket,
+      Key: key,
+      Body: fs.createReadStream(filePath),
+      ContentType: contentType,
+      CacheControl: String(contentType || '').startsWith('image/') ? 'no-cache, must-revalidate' : undefined
+    }));
     this.logger?.info(`R2 object stored: ${key}`);
     return { key, url: this.publicUrl ? `${this.publicUrl}/${key}` : null, etag: response.ETag || null };
   }

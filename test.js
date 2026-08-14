@@ -521,6 +521,8 @@ class SystemTest {
     const { R2Storage } = require('./utils/r2-storage');
     const fs = require('fs').promises;
     const os = require('os');
+    const axios = require('axios');
+    const sharp = require('sharp');
     const envKeys = ['OPENAI_API_KEY', 'GEMINI_API_KEY', 'CLOUDFLARE_ACCOUNT_ID', 'CLOUDFLARE_AI_API_TOKEN', 'IMAGE_PROVIDER', 'R2_ACCOUNT_ID'];
     const savedEnv = {};
     for (const key of envKeys) {
@@ -578,6 +580,21 @@ class SystemTest {
       }
       if (!invalidImageRejected) {
         throw new Error('R2 accepted JSON disguised as a PNG image');
+      }
+
+      const convertedImagePath = path.join(os.tmpdir(), `cloudflare-thumbnail-${Date.now()}.png`);
+      const originalAxiosPost = axios.post;
+      try {
+        const jpeg = await sharp({ create: { width: 16, height: 16, channels: 3, background: '#285078' } }).jpeg().toBuffer();
+        axios.post = async () => ({ data: { result: { image: jpeg.toString('base64') } } });
+        await generator.generateCloudflareImage('Miniatura bíblica', convertedImagePath);
+        const convertedHeader = (await fs.readFile(convertedImagePath)).subarray(0, 8);
+        if (!convertedHeader.equals(Buffer.from('89504e470d0a1a0a', 'hex'))) {
+          throw new Error('Cloudflare JPEG response was not converted to a real PNG');
+        }
+      } finally {
+        axios.post = originalAxiosPost;
+        await fs.unlink(convertedImagePath).catch(() => {});
       }
     } finally {
       for (const key of envKeys) {
