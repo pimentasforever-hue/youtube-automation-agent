@@ -465,6 +465,29 @@ class Database {
     }));
   }
 
+  async updateContentMetadata(contentId, title, topic) {
+    const production = await this.getRow('SELECT script_id, strategy_id FROM productions WHERE id = ?', [contentId]);
+    if (!production) return false;
+    if (production.script_id) await this.executeQuery('UPDATE scripts SET title = ? WHERE id = ?', [title, production.script_id]);
+    if (production.strategy_id) await this.executeQuery('UPDATE content_strategies SET topic = ? WHERE id = ?', [topic, production.strategy_id]);
+    const scheduled = await this.getRow('SELECT id FROM publish_schedule WHERE production_id = ?', [contentId]);
+    if (scheduled) await this.executeQuery('UPDATE publish_schedule SET title = ? WHERE production_id = ?', [title, contentId]);
+    return true;
+  }
+
+  async deleteContent(contentId) {
+    const production = await this.getRow('SELECT strategy_id, script_id, thumbnail_id, seo_id, assets FROM productions WHERE id = ?', [contentId]);
+    if (!production) return null;
+    const published = await this.getRow('SELECT youtube_url FROM publish_schedule WHERE production_id = ?', [contentId]);
+    await this.executeQuery('DELETE FROM publish_schedule WHERE production_id = ?', [contentId]);
+    await this.executeQuery('DELETE FROM productions WHERE id = ?', [contentId]);
+    if (production.thumbnail_id) await this.executeQuery('DELETE FROM thumbnails WHERE id = ?', [production.thumbnail_id]);
+    if (production.seo_id) await this.executeQuery('DELETE FROM seo_data WHERE id = ?', [production.seo_id]);
+    if (production.script_id) await this.executeQuery('DELETE FROM scripts WHERE id = ?', [production.script_id]);
+    if (production.strategy_id) await this.executeQuery('DELETE FROM content_strategies WHERE id = ?', [production.strategy_id]);
+    return { assets: JSON.parse(production.assets || '{}'), youtubeUrl: published?.youtube_url || null };
+  }
+
   // Publishing methods
   async saveScheduleEntry(entry) {
     const id = this.generateId('schedule');

@@ -1,6 +1,6 @@
 const fs = require('fs');
 const path = require('path');
-const { S3Client, PutObjectCommand } = require('@aws-sdk/client-s3');
+const { S3Client, PutObjectCommand, ListObjectsV2Command, DeleteObjectsCommand } = require('@aws-sdk/client-s3');
 
 class R2Storage {
   constructor() {
@@ -37,6 +37,16 @@ class R2Storage {
       production.assets[name] = { ...production.assets[name], ...uploaded };
     }
     return production;
+  }
+
+  async deleteProductionAssets(productionId) {
+    if (!this.enabled || !productionId) return 0;
+    const prefix = `productions/${productionId}/`;
+    const listed = await this.client.send(new ListObjectsV2Command({ Bucket: this.bucket, Prefix: prefix }));
+    const objects = (listed.Contents || []).map((object) => ({ Key: object.Key }));
+    if (!objects.length) return 0;
+    await this.client.send(new DeleteObjectsCommand({ Bucket: this.bucket, Delete: { Objects: objects, Quiet: true } }));
+    return objects.length;
   }
 }
 

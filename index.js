@@ -549,6 +549,36 @@ class YouTubeAutomationAgent {
       }
     });
 
+    this.app.patch('/contents/:contentId', this.requireAuth(), async (req, res) => {
+      try {
+        const title = typeof req.body?.title === 'string' ? req.body.title.trim() : '';
+        const topic = typeof req.body?.topic === 'string' ? req.body.topic.trim() : '';
+        if (!title || title.length > 100) return res.status(400).json({ success: false, error: 'O título deve ter de 1 a 100 caracteres.' });
+        if (!topic || topic.length > 300) return res.status(400).json({ success: false, error: 'O tema deve ter de 1 a 300 caracteres.' });
+        const updated = await this.db.updateContentMetadata(req.params.contentId, title, topic);
+        if (!updated) return res.status(404).json({ success: false, error: 'Conteúdo não encontrado.' });
+        return res.json({ success: true });
+      } catch (error) {
+        return res.status(500).json({ success: false, error: error.message });
+      }
+    });
+
+    this.app.delete('/contents/:contentId', this.requireAuth(), async (req, res) => {
+      try {
+        const deleted = await this.db.deleteContent(req.params.contentId);
+        if (!deleted) return res.status(404).json({ success: false, error: 'Conteúdo não encontrado.' });
+        let deletedFiles = 0;
+        try {
+          deletedFiles = await this.agents.production.storage.deleteProductionAssets(req.params.contentId);
+        } catch (error) {
+          this.logger.warn(`Content deleted, but R2 cleanup failed for ${req.params.contentId}: ${error.message}`);
+        }
+        return res.json({ success: true, deletedFiles, youtubePreserved: Boolean(deleted.youtubeUrl) });
+      } catch (error) {
+        return res.status(500).json({ success: false, error: error.message });
+      }
+    });
+
     this.app.get('/connections', this.requireAuth(), async (_req, res) => {
       const result = {
         youtube: { connected: false, authorized: Boolean(this.credentials.tokens?.youtube) },
