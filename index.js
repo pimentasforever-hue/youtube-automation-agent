@@ -14,6 +14,7 @@ const { ProductionManagementAgent } = require('./agents/production-management-ag
 const { PublishingSchedulingAgent } = require('./agents/publishing-scheduling-agent');
 const { AnalyticsOptimizationAgent } = require('./agents/analytics-optimization-agent');
 const { DailyAutomation } = require('./schedules/daily-automation');
+const { ProductionQueue } = require('./utils/production-queue');
 const { version } = require('./package.json');
 const chalk = require('chalk');
 
@@ -28,6 +29,7 @@ class YouTubeAutomationAgent {
     this.loginAttempts = new Map();
     this.productionJobs = new Map();
     this.googleAuthStates = new Map();
+    this.productionQueue = null;
   }
 
   async initialize() {
@@ -42,7 +44,7 @@ class YouTubeAutomationAgent {
       await this.db.ensureUser(process.env.AUTH_USERNAME, process.env.AUTH_PASSWORD_HASH);
       const interruptedCount = await this.db.recoverInterruptedProductions();
       if (interruptedCount) this.logger.warn(`${interruptedCount} interrupted production(s) recovered from the previous process`);
-      const interruptedJobCount = await this.db.recoverInterruptedProductionJobs();
+      const interruptedJobCount = process.env.REDIS_URL ? 0 : await this.db.recoverInterruptedProductionJobs();
       if (interruptedJobCount) this.logger.warn(`${interruptedJobCount} interrupted production job(s) closed after restart`);
       
       // Load credentials
@@ -59,6 +61,13 @@ class YouTubeAutomationAgent {
       // Initialize agents
       this.logger.info('Initializing agents...');
       await this.initializeAgents();
+
+      this.productionQueue = new ProductionQueue({
+        processJob: (options, jobId) => this.generateContent(options.topic, options.style, options.length, options, jobId),
+        onProgress: (jobId, stage, progress, message, result) => this.updateProductionJob(jobId, stage, progress, message, result),
+        logger: this.logger
+      });
+      await this.productionQueue.initialize();
 
       // Show which pipeline stages will run for real vs. be simulated
       await this.logCapabilitySummary();
@@ -465,16 +474,8 @@ class YouTubeAutomationAgent {
         const jobId = `job_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
         const options = validation.value;
         this.updateProductionJob(jobId, 'queued', 3, 'Produção adicionada à fila');
-        res.status(202).json({ success: true, jobId });
-        Promise.resolve().then(async () => {
-          try {
-            const result = await this.generateContent(options.topic, options.style, options.length, options, jobId);
-            this.updateProductionJob(jobId, 'completed', 100, 'Conteúdo pronto', result);
-          } catch (error) {
-            this.updateProductionJob(jobId, 'failed', 100, error.message);
-            this.logger.error(`Production job ${jobId} failed:`, error);
-          }
-        });
+        const queued = await this.productionQueue.add(jobId, options);
+        res.status(202).json({ success: true, jobId, queue: queued.mode });
       } catch (error) {
         res.status(500).json({ success: false, error: error.message });
       }
@@ -636,7 +637,8 @@ class YouTubeAutomationAgent {
         youtube: { connected: false, authorized: Boolean(this.credentials.tokens?.youtube) },
         ai: { connected: this.credentials.hasAITextProvider(), provider: process.env.GEMINI_API_KEY ? 'Gemini' : process.env.OPENAI_API_KEY ? 'OpenAI' : null },
         storage: { connected: Boolean(process.env.R2_ACCOUNT_ID && process.env.R2_ACCESS_KEY_ID && process.env.R2_SECRET_ACCESS_KEY && process.env.R2_BUCKET), provider: process.env.R2_BUCKET ? 'Cloudflare R2' : 'Railway Volume', bucket: process.env.R2_BUCKET || null },
-        database: { connected: true, provider: this.db.isPostgres ? 'PostgreSQL' : 'SQLite', managedBy: this.db.isPostgres ? 'Railway' : 'Aplicação' }
+        database: { connected: true, provider: this.db.isPostgres ? 'PostgreSQL' : 'SQLite', managedBy: this.db.isPostgres ? 'Railway' : 'Aplicação' },
+        queue: this.productionQueue?.status() || { connected: false, provider: 'Fila local' }
       };
       try {
         const youtube = this.credentials.getYouTubeClient();
@@ -731,6 +733,7 @@ class YouTubeAutomationAgent {
     // Step 5: Production Management
     if (jobId) this.updateProductionJob(jobId, 'production', 65, 'Gerando áudio, cenas e legendas');
     const productionData = await this.agents.production.processContent({
+      productionId: jobId ? `prod_${jobId}` : null,
       strategy,
       script,
       thumbnail,

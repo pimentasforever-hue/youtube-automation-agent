@@ -53,7 +53,7 @@ class ProductionManagementAgent {
       const { strategy, script, thumbnail, seo, options = {}, onProgress = () => {} } = contentData;
       
       // Create production entry
-      const productionId = this.generateProductionId();
+      const productionId = contentData.productionId || this.generateProductionId();
       
       const productionData = {
         id: productionId,
