@@ -1,4 +1,5 @@
 const sqlite3 = require('sqlite3').verbose();
+const { Pool } = require('pg');
 const path = require('path');
 const fs = require('fs').promises;
 const { Logger } = require('../utils/logger');
@@ -7,6 +8,7 @@ class Database {
   constructor() {
     this.dbPath = path.join(__dirname, '..', 'data', 'youtube_automation.db');
     this.db = null;
+    this.isPostgres = Boolean(process.env.DATABASE_URL);
     this.logger = new Logger('Database');
   }
 
@@ -14,14 +16,17 @@ class Database {
     try {
       this.logger.info('Initializing database...');
       
-      // Ensure data directory exists
-      await fs.mkdir(path.dirname(this.dbPath), { recursive: true });
-      
-      // Connect to database
-      this.db = new sqlite3.Database(this.dbPath);
+      if (this.isPostgres) {
+        this.db = new Pool({ connectionString: process.env.DATABASE_URL });
+        await this.db.query('SELECT 1');
+      } else {
+        await fs.mkdir(path.dirname(this.dbPath), { recursive: true });
+        this.db = new sqlite3.Database(this.dbPath);
+      }
       
       // Create tables
       await this.createTables();
+      if (this.isPostgres) await this.migrateSQLiteData();
       
       this.logger.success('Database initialized successfully');
       return true;
@@ -185,6 +190,15 @@ class Database {
         data TEXT,
         created_at TEXT DEFAULT CURRENT_TIMESTAMP
       )`,
+      `CREATE TABLE IF NOT EXISTS users (
+        id TEXT PRIMARY KEY,
+        username TEXT NOT NULL UNIQUE,
+        password_hash TEXT NOT NULL,
+        role TEXT NOT NULL DEFAULT 'admin',
+        active INTEGER NOT NULL DEFAULT 1,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+      )`,
             // System Settings
       `CREATE TABLE IF NOT EXISTS settings (
         key TEXT PRIMARY KEY,
@@ -331,11 +345,15 @@ class Database {
 
   // Production methods
   async saveProductionData(production) {
+    const insertVerb = this.isPostgres ? 'INSERT INTO' : 'INSERT OR REPLACE INTO';
+    const conflictClause = this.isPostgres
+      ? ' ON CONFLICT (id) DO UPDATE SET strategy_id = EXCLUDED.strategy_id, script_id = EXCLUDED.script_id, thumbnail_id = EXCLUDED.thumbnail_id, seo_id = EXCLUDED.seo_id, status = EXCLUDED.status, assets = EXCLUDED.assets, timeline = EXCLUDED.timeline, scheduled_publish_time = EXCLUDED.scheduled_publish_time, priority = EXCLUDED.priority, estimated_duration = EXCLUDED.estimated_duration'
+      : '';
     await this.executeQuery(
-      `INSERT OR REPLACE INTO productions (
+      `${insertVerb} productions (
         id, strategy_id, script_id, thumbnail_id, seo_id, status, assets,
         timeline, scheduled_publish_time, priority, estimated_duration
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)${conflictClause}`,
       [
         production.id,
         production.strategy?.id || production.strategyId || null,
@@ -600,9 +618,11 @@ class Database {
   }
 
   async setSetting(key, value, description = null) {
+    const query = this.isPostgres
+      ? `INSERT INTO settings (key, value, description, updated_at) VALUES (?, ?, COALESCE(?, (SELECT description FROM settings WHERE key = ?)), CURRENT_TIMESTAMP) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, description = EXCLUDED.description, updated_at = CURRENT_TIMESTAMP`
+      : `INSERT OR REPLACE INTO settings (key, value, description, updated_at) VALUES (?, ?, COALESCE(?, (SELECT description FROM settings WHERE key = ?)), datetime('now'))`;
     await this.executeQuery(
-      `INSERT OR REPLACE INTO settings (key, value, description, updated_at) 
-       VALUES (?, ?, COALESCE(?, (SELECT description FROM settings WHERE key = ?)), datetime('now'))`,
+      query,
       [key, value, description, key]
     );
   }
@@ -620,7 +640,62 @@ class Database {
     return `${prefix}_${Date.now()}_${Math.random().toString(36).substring(7)}`;
   }
 
+  async ensureUser(username, passwordHash, role = 'admin') {
+    if (!username || !passwordHash) return;
+    const existing = await this.getRow('SELECT id FROM users WHERE username = ?', [username]);
+    if (!existing) await this.executeQuery('INSERT INTO users (id, username, password_hash, role) VALUES (?, ?, ?, ?)', [this.generateId('user'), username, passwordHash, role]);
+  }
+
+  async getUserByUsername(username) {
+    return this.getRow('SELECT id, username, password_hash, role, active FROM users WHERE username = ?', [username]);
+  }
+
+  postgresQuery(query) {
+    let index = 0;
+    let sql = query
+      .replace(/INTEGER PRIMARY KEY AUTOINCREMENT/g, 'BIGSERIAL PRIMARY KEY')
+      .replace(/TEXT DEFAULT CURRENT_TIMESTAMP/g, 'TEXT DEFAULT (CURRENT_TIMESTAMP::text)')
+      .replace(/datetime\(['"]now['"],\s*['"]-30 days['"]\)/g, "((CURRENT_TIMESTAMP - INTERVAL '30 days')::text)")
+      .replace(/datetime\(['"]now['"]\)/g, '(CURRENT_TIMESTAMP::text)')
+      .replace(/datetime\(\?\)/g, '?')
+      .replace(/status = "published"/g, "status = 'published'")
+      .replace(/\?/g, () => `$${++index}`);
+    if (/^INSERT OR IGNORE INTO settings/i.test(sql)) {
+      sql = sql.replace(/^INSERT OR IGNORE/i, 'INSERT') + ' ON CONFLICT (key) DO NOTHING';
+    }
+    return sql;
+  }
+
+  async migrateSQLiteData() {
+    try {
+      await fs.access(this.dbPath);
+    } catch {
+      return;
+    }
+    const tables = ['content_strategies', 'scripts', 'thumbnails', 'seo_data', 'productions', 'publish_schedule', 'analytics_reports', 'keyword_performance', 'content_history', 'settings'];
+    const source = new sqlite3.Database(this.dbPath, sqlite3.OPEN_READONLY);
+    const readRows = query => new Promise((resolve, reject) => source.all(query, (error, rows) => error ? reject(error) : resolve(rows || [])));
+    try {
+      for (const table of tables) {
+        const rows = await readRows(`SELECT * FROM ${table}`);
+        for (const row of rows) {
+          const columns = Object.keys(row);
+          const values = columns.map(column => row[column]);
+          const placeholders = columns.map(() => '?').join(', ');
+          await this.executeQuery(`INSERT INTO ${table} (${columns.join(', ')}) VALUES (${placeholders}) ON CONFLICT DO NOTHING`, values);
+        }
+      }
+      this.logger.info('Existing SQLite records migrated to PostgreSQL.');
+    } finally {
+      await new Promise(resolve => source.close(() => resolve()));
+    }
+  }
+
   async executeQuery(query, params = []) {
+    if (this.isPostgres) {
+      const result = await this.db.query(this.postgresQuery(query), params);
+      return { lastID: null, changes: result.rowCount };
+    }
     return new Promise((resolve, reject) => {
       this.db.run(query, params, function(error) {
         if (error) {
@@ -633,6 +708,10 @@ class Database {
   }
 
   async getRow(query, params = []) {
+    if (this.isPostgres) {
+      const result = await this.db.query(this.postgresQuery(query), params);
+      return result.rows[0];
+    }
     return new Promise((resolve, reject) => {
       this.db.get(query, params, (error, row) => {
         if (error) {
@@ -645,6 +724,10 @@ class Database {
   }
 
   async getAllRows(query, params = []) {
+    if (this.isPostgres) {
+      const result = await this.db.query(this.postgresQuery(query), params);
+      return result.rows || [];
+    }
     return new Promise((resolve, reject) => {
       this.db.all(query, params, (error, rows) => {
         if (error) {
@@ -658,6 +741,7 @@ class Database {
 
   async close() {
     if (this.db) {
+      if (this.isPostgres) return this.db.end();
       return new Promise((resolve) => {
         this.db.close((error) => {
           if (error) {
@@ -671,6 +755,7 @@ class Database {
 
   async backup() {
     try {
+      if (this.isPostgres) return 'Railway managed PostgreSQL backup';
       const backupPath = path.join(
         path.dirname(this.dbPath),
         `backup_${Date.now()}.db`
@@ -714,6 +799,10 @@ class Database {
 
   async getDatabaseSize() {
     try {
+      if (this.isPostgres) {
+        const row = await this.getRow('SELECT pg_size_pretty(pg_database_size(current_database())) AS size');
+        return row?.size || 'Unknown';
+      }
       const fs = require('fs').promises;
       const stats = await fs.stat(this.dbPath);
       return `${(stats.size / 1024 / 1024).toFixed(2)} MB`;

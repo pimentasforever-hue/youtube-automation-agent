@@ -39,6 +39,7 @@ class YouTubeAutomationAgent {
       this.logger.info('Initializing database...');
       this.db = new Database();
       await this.db.initialize();
+      await this.db.ensureUser(process.env.AUTH_USERNAME, process.env.AUTH_PASSWORD_HASH);
       
       // Load credentials
       this.logger.info('Loading credentials...');
@@ -308,7 +309,7 @@ class YouTubeAutomationAgent {
       return res.sendFile(path.join(__dirname, 'dashboard', 'login.html'));
     });
 
-    this.app.post('/api/auth/login', (req, res) => {
+    this.app.post('/api/auth/login', async (req, res) => {
       const ip = req.ip || req.socket?.remoteAddress || 'unknown';
       const now = Date.now();
       const attempt = this.loginAttempts.get(ip) || { count: 0, resetAt: now + 15 * 60 * 1000 };
@@ -320,19 +321,21 @@ class YouTubeAutomationAgent {
         return res.status(429).json({ success: false, error: 'Muitas tentativas. Aguarde alguns minutos.' });
       }
 
-      const submittedUsername = Buffer.from(typeof req.body?.username === 'string' ? req.body.username : '');
-      const configuredUsername = Buffer.from(process.env.AUTH_USERNAME);
-      const usernameMatches = submittedUsername.length === configuredUsername.length &&
-        crypto.timingSafeEqual(submittedUsername, configuredUsername);
-      const passwordMatches = typeof req.body?.password === 'string' && this.verifyPassword(req.body.password);
-      if (!usernameMatches || !passwordMatches) {
+      const username = typeof req.body?.username === 'string' ? req.body.username.trim() : '';
+      const user = await this.db.getUserByUsername(username);
+      const [salt, expected = ''] = (user?.password_hash || '').split(':');
+      const actual = salt && typeof req.body?.password === 'string'
+        ? crypto.pbkdf2Sync(req.body.password, salt, 210000, 32, 'sha256').toString('hex')
+        : '';
+      const passwordMatches = actual.length === expected.length && actual.length > 0 && crypto.timingSafeEqual(Buffer.from(actual), Buffer.from(expected));
+      if (!user || !Number(user.active) || !passwordMatches) {
         attempt.count += 1;
         this.loginAttempts.set(ip, attempt);
         return res.status(401).json({ success: false, error: 'Usuário ou senha incorretos.' });
       }
 
       this.loginAttempts.delete(ip);
-      const token = this.createSessionToken(process.env.AUTH_USERNAME);
+      const token = this.createSessionToken(user.username);
       res.setHeader('Set-Cookie', `yaa_session=${token}; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=43200`);
       return res.json({ success: true });
     });
