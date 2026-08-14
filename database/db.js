@@ -650,6 +650,10 @@ class Database {
     return this.getRow('SELECT id, username, password_hash, role, active FROM users WHERE username = ?', [username]);
   }
 
+  async updateUserCredentials(id, username, passwordHash) {
+    await this.executeQuery('UPDATE users SET username = ?, password_hash = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [username, passwordHash, id]);
+  }
+
   postgresQuery(query) {
     let index = 0;
     let sql = query

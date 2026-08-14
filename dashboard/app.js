@@ -237,14 +237,43 @@ $('settings-form').addEventListener('submit', async (event) => {
 });
 
 async function loadSettings() {
-  const response = await request('/settings');
+  const [response, authResponse] = await Promise.all([request('/settings'), request('/api/auth/status')]);
   if (!response.ok) return;
   const settings = await response.json();
   $('default-minutes').value = settings.default_target_minutes || 8;
   $('default-scenes').value = settings.default_scene_count || 8;
   $('target-minutes').value = settings.default_target_minutes || 8;
   $('scene-count').value = settings.default_scene_count || 8;
+  if (authResponse.ok) $('account-username').value = (await authResponse.json()).username || '';
 }
+
+$('confirm-password').addEventListener('blur', () => {
+  const matches = $('confirm-password').value === $('new-password').value;
+  $('confirm-password').setCustomValidity(matches ? '' : 'As senhas não coincidem.');
+});
+
+$('account-form').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const message = $('account-message');
+  if ($('new-password').value !== $('confirm-password').value) {
+    $('confirm-password').setCustomValidity('As senhas não coincidem.');
+    $('confirm-password').reportValidity();
+    return;
+  }
+  message.className = 'form-message';
+  message.textContent = 'Atualizando acesso.';
+  const response = await request('/api/account', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: $('account-username').value.trim(), currentPassword: $('current-password').value, newPassword: $('new-password').value }) });
+  const result = await response.json();
+  if (!response.ok) {
+    message.className = 'form-message error';
+    message.textContent = result.error || 'Não foi possível atualizar o acesso.';
+    message.focus();
+    return;
+  }
+  message.className = 'form-message success';
+  message.textContent = 'Acesso atualizado. Redirecionando para o login.';
+  setTimeout(() => window.location.assign('/login'), 900);
+});
 
 showView(window.location.hash.slice(1) || 'overview', false);
 loadDashboard();

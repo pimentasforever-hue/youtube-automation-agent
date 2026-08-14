@@ -113,6 +113,8 @@ main { width: min(1320px,100%); margin: 0 auto; padding: 36px clamp(20px,4vw,48p
 .video-empty p { color: rgba(255,255,255,.65); }
 .connection-card { grid-column: span 2; }
 .connection-action { width: fit-content; margin-top: 14px; text-decoration: none; }
+.settings-stack { display: grid; gap: 20px; }
+.field-help { display: block; margin: -8px 0 14px; color: var(--muted); }
 .external-link { width: 38px; height: 38px; display: grid; place-items: center; color: var(--blue); border-radius: 10px; text-decoration: none; }
 .external-link:hover { background: rgba(0,113,227,.08); }
 .empty-state { padding: 70px 24px; display: grid; place-items: center; text-align: center; border: 1px dashed var(--hairline); border-radius: var(--radius-lg); }

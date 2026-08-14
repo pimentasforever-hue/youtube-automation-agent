@@ -200,6 +200,19 @@ class YouTubeAutomationAgent {
     return actualBuffer.length === expectedBuffer.length && crypto.timingSafeEqual(actualBuffer, expectedBuffer);
   }
 
+  verifyPasswordHash(password = '', encoded = '') {
+    const [salt, expected = ''] = encoded.split(':');
+    if (!salt || !expected) return false;
+    const actual = crypto.pbkdf2Sync(password, salt, 210000, 32, 'sha256').toString('hex');
+    return actual.length === expected.length && crypto.timingSafeEqual(Buffer.from(actual), Buffer.from(expected));
+  }
+
+  hashPassword(password) {
+    const salt = crypto.randomBytes(16).toString('hex');
+    const hash = crypto.pbkdf2Sync(password, salt, 210000, 32, 'sha256').toString('hex');
+    return `${salt}:${hash}`;
+  }
+
   requireAuth() {
     return (req, res, next) => {
       const token = this.parseCookies(req.headers.cookie || '').yaa_session;
@@ -347,6 +360,25 @@ class YouTubeAutomationAgent {
 
     this.app.get('/api/auth/status', this.requireAuth(), (req, res) => {
       res.json({ authenticated: true, username: req.user.username });
+    });
+
+    this.app.put('/api/account', this.requireAuth(), async (req, res) => {
+      try {
+        const currentPassword = typeof req.body?.currentPassword === 'string' ? req.body.currentPassword : '';
+        const username = typeof req.body?.username === 'string' ? req.body.username.trim() : '';
+        const newPassword = typeof req.body?.newPassword === 'string' ? req.body.newPassword : '';
+        if (!/^[a-zA-Z0-9._-]{3,40}$/.test(username)) return res.status(400).json({ success: false, error: 'Use de 3 a 40 caracteres no usuário.' });
+        if (newPassword.length < 12) return res.status(400).json({ success: false, error: 'A nova senha deve ter pelo menos 12 caracteres.' });
+        const user = await this.db.getUserByUsername(req.user.username);
+        if (!user || !this.verifyPasswordHash(currentPassword, user.password_hash)) return res.status(403).json({ success: false, error: 'A senha atual está incorreta.' });
+        const existing = await this.db.getUserByUsername(username);
+        if (existing && existing.id !== user.id) return res.status(409).json({ success: false, error: 'Este usuário já está em uso.' });
+        await this.db.updateUserCredentials(user.id, username, this.hashPassword(newPassword));
+        res.setHeader('Set-Cookie', 'yaa_session=; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=0');
+        return res.json({ success: true });
+      } catch (error) {
+        return res.status(500).json({ success: false, error: error.message });
+      }
     });
 
     this.app.get('/auth/google', this.requireAuth(), (req, res) => {
