@@ -5,7 +5,7 @@ const path = require('path');
 const axios = require('axios');
 const sharp = require('sharp');
 const { Logger } = require('./logger');
-const { runFFmpeg, checkFFmpeg, ffmpegInstallHint } = require('./ffmpeg');
+const { runFFmpeg, checkFFmpeg, probeMediaDuration, ffmpegInstallHint } = require('./ffmpeg');
 const { GeminiClientPool, geminiKeys } = require('./gemini-client-pool');
 
 class AIVideoGenerator {
@@ -56,6 +56,11 @@ class AIVideoGenerator {
 
     const requestedImageProvider = String(process.env.IMAGE_PROVIDER || '').trim().toLowerCase();
     this.imageProvider = requestedImageProvider || (this.cloudflareAI ? 'cloudflare' : this.openai ? 'openai' : this.gemini ? 'gemini' : null);
+
+    this.pexelsApiKey = credentials.pexels?.apiKey || process.env.PEXELS_API_KEY;
+    this.pixabayApiKey = credentials.pixabay?.apiKey || process.env.PIXABAY_API_KEY;
+    this.stockVideoProvider = this.pexelsApiKey ? 'pexels' : this.pixabayApiKey ? 'pixabay' : null;
+    if (this.stockVideoProvider) this.logger.info(`Stock video service initialized: ${this.stockVideoProvider}`);
     
     // ElevenLabs configuration
     this.elevenLabsApiKey = credentials.elevenLabs?.apiKey || process.env.ELEVENLABS_API_KEY;
@@ -395,20 +400,143 @@ class AIVideoGenerator {
     });
   }
 
+  hasStockVideoProvider() {
+    return Boolean(this.stockVideoProvider);
+  }
+
+  normalizeStockQuery(value) {
+    const replacements = new Map([
+      ['bíblia', 'bible'], ['biblico', 'biblical'], ['bíblico', 'biblical'],
+      ['jesus', 'jesus'], ['cristo', 'christ'], ['deus', 'god'],
+      ['jerusalém', 'jerusalem'], ['jerusalem', 'jerusalem'],
+      ['deserto', 'desert'], ['tempestade', 'storm'], ['mar', 'sea'],
+      ['oração', 'prayer'], ['oracao', 'prayer'], ['cruz', 'cross'],
+      ['igreja', 'church'], ['céu', 'heaven'], ['ceu', 'heaven'],
+      ['milagre', 'miracle'], ['profeta', 'prophet'], ['antigo', 'ancient']
+    ]);
+    const ignored = new Set(['cena', 'composicao', 'visual', 'distinta', 'eterno', 'ethereal', 'dreamy', 'mystical', 'lighting', 'background', 'high', 'quality', 'aspect', 'ratio', 'digital', 'art']);
+    const words = String(value || '')
+      .normalize('NFKD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase()
+      .replace(/[^a-z0-9\s]/g, ' ')
+      .split(/\s+/)
+      .filter(word => word.length > 2 && !ignored.has(word));
+    const translated = words.map(word => replacements.get(word) || word);
+    return Array.from(new Set(['biblical', ...translated])).slice(0, 8).join(' ');
+  }
+
+  async fetchStockVideo(query, outputPath, usedIds = new Set()) {
+    if (!this.hasStockVideoProvider()) return null;
+    const normalizedQuery = this.normalizeStockQuery(query);
+    const result = this.stockVideoProvider === 'pexels'
+      ? await this.searchPexelsVideo(normalizedQuery, usedIds)
+      : await this.searchPixabayVideo(normalizedQuery, usedIds);
+    if (!result) return null;
+
+    await fs.mkdir(path.dirname(outputPath), { recursive: true });
+    await this.downloadVideo(result.url, outputPath);
+    const stats = await fs.stat(outputPath);
+    if (!stats.isFile() || stats.size < 10000) {
+      await fs.unlink(outputPath).catch(() => {});
+      throw new Error('O vídeo de acervo recebido está vazio ou incompleto.');
+    }
+    return { ...result, path: outputPath, query: normalizedQuery };
+  }
+
+  async searchPexelsVideo(query, usedIds = new Set()) {
+    const response = await axios.get('https://api.pexels.com/v1/videos/search', {
+      headers: { Authorization: this.pexelsApiKey },
+      params: { query, orientation: 'landscape', size: 'medium', per_page: 15, locale: 'pt-BR' },
+      timeout: 30000
+    });
+    for (const video of response.data?.videos || []) {
+      const id = `pexels:${video.id}`;
+      if (usedIds.has(id)) continue;
+      const candidates = (video.video_files || [])
+        .filter(file => file.link && file.file_type === 'video/mp4')
+        .sort((a, b) => Math.abs((a.width || 1280) - 1920) - Math.abs((b.width || 1280) - 1920));
+      const file = candidates.find(candidate => (candidate.width || 0) >= 1280) || candidates[0];
+      if (!file) continue;
+      usedIds.add(id);
+      return {
+        id,
+        provider: 'Pexels',
+        url: file.link,
+        sourceUrl: video.url,
+        creator: video.user?.name || null,
+        width: file.width,
+        height: file.height,
+        duration: video.duration
+      };
+    }
+    return null;
+  }
+
+  async searchPixabayVideo(query, usedIds = new Set()) {
+    const response = await axios.get('https://pixabay.com/api/videos/', {
+      params: { key: this.pixabayApiKey, q: query, video_type: 'film', category: 'religion', safesearch: true, per_page: 20 },
+      timeout: 30000
+    });
+    for (const video of response.data?.hits || []) {
+      const id = `pixabay:${video.id}`;
+      if (usedIds.has(id)) continue;
+      const file = video.videos?.medium || video.videos?.small || video.videos?.large;
+      if (!file?.url) continue;
+      usedIds.add(id);
+      return {
+        id,
+        provider: 'Pixabay',
+        url: file.url,
+        sourceUrl: video.pageURL,
+        creator: video.user || null,
+        width: file.width,
+        height: file.height,
+        duration: video.duration
+      };
+    }
+    return null;
+  }
+
   async generateVideo(script, visualAssets, audioPath, outputPath) {
     this.logger.info('Generating video from assets...');
     
     try {
-      // Try Replicate for video generation first
-      if (this.replicate && this.replicate.auth) {
-        return await this.generateReplicateVideo(script, visualAssets, audioPath, outputPath);
-      }
-      
-      // Fallback to simple slideshow with Playwright
-      return await this.generateSlideshowVideo(script, visualAssets, audioPath, outputPath);
+      return await this.generateHybridVideo(script, visualAssets, audioPath, outputPath);
     } catch (error) {
       this.logger.error('Video generation failed:', error);
       throw error;
+    }
+  }
+
+  async generateHybridVideo(script, visualAssets, audioPath, outputPath) {
+    this.logger.info('Creating cinematic hybrid video...');
+    if (!(await checkFFmpeg())) throw new Error(ffmpegInstallHint());
+
+    const mediaAssets = await this.filterMediaAssets(visualAssets);
+    if (!mediaAssets.length) throw new Error('Nenhuma cena válida foi encontrada para montar o vídeo.');
+
+    const workDir = path.join(path.dirname(outputPath), `${path.basename(outputPath, '.mp4')}_timeline`);
+    const visualPath = outputPath.replace('.mp4', '_visual.mp4');
+    try {
+      const narrationDuration = await this.isUsableAudioFile(audioPath)
+        ? await probeMediaDuration(audioPath)
+        : this.calculateScriptDuration(script);
+      if (!Number.isFinite(narrationDuration) || narrationDuration <= 0) {
+        throw new Error('A duração real da narração não pôde ser medida.');
+      }
+
+      await this.renderMediaTimeline(mediaAssets, narrationDuration, visualPath, workDir);
+      await this.addAudioToVideo(visualPath, audioPath, outputPath, narrationDuration);
+
+      const finalDuration = await probeMediaDuration(outputPath);
+      if (Math.abs(finalDuration - narrationDuration) > 1.25) {
+        throw new Error(`O vídeo final ficou com ${finalDuration.toFixed(1)} segundos, mas a narração possui ${narrationDuration.toFixed(1)} segundos.`);
+      }
+      return outputPath;
+    } finally {
+      await this.cleanupDirectory(workDir);
+      await fs.unlink(visualPath).catch(() => {});
     }
   }
 
@@ -434,6 +562,69 @@ class AIVideoGenerator {
     }
 
     return outputPath;
+  }
+
+  async filterMediaAssets(visualAssets = []) {
+    const supported = new Set(['.png', '.jpg', '.jpeg', '.webp', '.mp4', '.mov', '.m4v', '.webm']);
+    const media = [];
+    for (const asset of visualAssets) {
+      const assetPath = typeof asset === 'string' ? asset : asset?.path;
+      if (!assetPath || !supported.has(path.extname(assetPath).toLowerCase())) continue;
+      try {
+        const stats = await fs.stat(assetPath);
+        if (stats.isFile() && stats.size > 0) media.push(assetPath);
+      } catch (error) {
+        // Ignore media removed by an interrupted attempt
+      }
+    }
+    return media;
+  }
+
+  async renderMediaTimeline(mediaAssets, totalDuration, videoPath, workDir) {
+    await fs.mkdir(workDir, { recursive: true });
+    const segmentDuration = totalDuration / mediaAssets.length;
+    const segments = [];
+
+    for (let index = 0; index < mediaAssets.length; index += 1) {
+      const asset = mediaAssets[index];
+      const segmentPath = path.join(workDir, `segment_${String(index).padStart(4, '0')}.mp4`);
+      const extension = path.extname(asset).toLowerCase();
+      const isVideo = ['.mp4', '.mov', '.m4v', '.webm'].includes(extension);
+      const commonOutput = [
+        '-t', segmentDuration.toFixed(3),
+        '-an',
+        '-c:v', 'libx264',
+        '-preset', process.env.VIDEO_FFMPEG_PRESET || 'veryfast',
+        '-crf', String(Number(process.env.VIDEO_CRF) || 22),
+        '-pix_fmt', 'yuv420p',
+        '-r', '30',
+        '-movflags', '+faststart',
+        segmentPath
+      ];
+
+      if (isVideo) {
+        await runFFmpeg([
+          '-y', '-stream_loop', '-1', '-i', asset,
+          '-vf', 'scale=1920:1080:force_original_aspect_ratio=increase,crop=1920:1080,fps=30,format=yuv420p',
+          ...commonOutput
+        ]);
+      } else {
+        const frames = Math.max(1, Math.ceil(segmentDuration * 30));
+        await runFFmpeg([
+          '-y', '-loop', '1', '-i', asset,
+          '-vf', `scale=2200:1238:force_original_aspect_ratio=increase,crop=2200:1238,zoompan=z='min(zoom+0.00025,1.12)':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=1:s=1920x1080:fps=30,trim=duration=${segmentDuration.toFixed(3)},setpts=PTS-STARTPTS,format=yuv420p`,
+          '-frames:v', String(frames),
+          ...commonOutput
+        ]);
+      }
+      segments.push(segmentPath);
+    }
+
+    const listPath = path.join(workDir, 'segments.txt');
+    const list = segments.map(segment => `file '${segment.replace(/'/g, "'\\''")}'`).join('\n');
+    await fs.writeFile(listPath, list);
+    await runFFmpeg(['-y', '-f', 'concat', '-safe', '0', '-i', listPath, '-c', 'copy', '-movflags', '+faststart', videoPath]);
+    return videoPath;
   }
 
   async generateSlideshowVideo(script, visualAssets, audioPath, outputPath) {
@@ -778,6 +969,13 @@ class AIVideoGenerator {
         if (typeof section.content === 'string') {
           totalWords += section.content.split(' ').length;
         }
+        if (Array.isArray(section.content)) {
+          totalWords += section.content
+            .filter(line => typeof line === 'string' && !line.startsWith('['))
+            .join(' ')
+            .split(/\s+/)
+            .filter(Boolean).length;
+        }
         if (Array.isArray(section.items)) {
           section.items.forEach(item => {
             totalWords += (item.title + ' ' + item.description).split(' ').length;
@@ -799,7 +997,7 @@ class AIVideoGenerator {
     return Math.max(30, Math.ceil((totalWords / 150) * 60));
   }
 
-  async addAudioToVideo(videoPath, audioPath, outputPath) {
+  async addAudioToVideo(videoPath, audioPath, outputPath, targetDuration = null) {
     const hasRealAudio = await this.isUsableAudioFile(audioPath);
 
     if (!hasRealAudio) {
@@ -815,7 +1013,10 @@ class AIVideoGenerator {
       ? outputPath.replace(/\.mp4$/i, '_muxed.mp4')
       : outputPath;
 
-    await runFFmpeg(['-y', '-i', videoPath, '-i', audioPath, '-c:v', 'copy', '-c:a', 'aac', '-shortest', muxPath]);
+    const durationArgs = Number.isFinite(targetDuration) && targetDuration > 0
+      ? ['-t', targetDuration.toFixed(3)]
+      : ['-shortest'];
+    await runFFmpeg(['-y', '-i', videoPath, '-i', audioPath, '-c:v', 'copy', '-c:a', 'aac', ...durationArgs, '-movflags', '+faststart', muxPath]);
 
     if (muxPath !== outputPath) {
       await fs.rename(muxPath, outputPath);

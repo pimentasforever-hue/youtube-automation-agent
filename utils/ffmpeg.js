@@ -44,6 +44,38 @@ async function runFFmpeg(args) {
   return execFileAsync(getFFmpegPath(), args, { maxBuffer: 32 * 1024 * 1024 });
 }
 
+async function probeMediaDuration(filePath) {
+  const { stdout } = await execFileAsync(getFFmpegPath(), [
+    '-v', 'error',
+    '-progress', 'pipe:1',
+    '-nostats',
+    '-i', filePath,
+    '-map', '0:a:0?',
+    '-map', '0:v:0?',
+    '-f', 'null',
+    '-'
+  ], { maxBuffer: 32 * 1024 * 1024 });
+
+  const progressLines = String(stdout || '').split(/\r?\n/);
+  const microseconds = progressLines
+    .filter(line => line.startsWith('out_time_us='))
+    .map(line => Number(line.slice('out_time_us='.length)))
+    .filter(Number.isFinite)
+    .pop();
+
+  if (Number.isFinite(microseconds) && microseconds > 0) {
+    return microseconds / 1000000;
+  }
+
+  const timestamp = progressLines
+    .filter(line => line.startsWith('out_time='))
+    .map(line => line.slice('out_time='.length))
+    .pop();
+  const match = String(timestamp || '').match(/(\d+):(\d+):(\d+(?:\.\d+)?)/);
+  if (!match) throw new Error(`Não foi possível medir a duração de ${filePath}.`);
+  return (Number(match[1]) * 3600) + (Number(match[2]) * 60) + Number(match[3]);
+}
+
 function ffmpegInstallHint() {
   const hints = {
     win32: 'winget install Gyan.FFmpeg (then restart your terminal)',
@@ -55,4 +87,4 @@ function ffmpegInstallHint() {
   return `FFmpeg not found. Install it with: ${platformHint} , or run "npm install" again to fetch the bundled ffmpeg-static binary, or set FFMPEG_PATH to your ffmpeg executable.`;
 }
 
-module.exports = { getFFmpegPath, checkFFmpeg, runFFmpeg, ffmpegInstallHint };
+module.exports = { getFFmpegPath, checkFFmpeg, runFFmpeg, probeMediaDuration, ffmpegInstallHint };

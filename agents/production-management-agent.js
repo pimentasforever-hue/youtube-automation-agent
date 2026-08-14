@@ -3,7 +3,7 @@ const fs = require('fs').promises;
 const { Logger } = require('../utils/logger');
 const { AIVideoGenerator } = require('../utils/ai-video-generator');
 const { R2Storage } = require('../utils/r2-storage');
-const { runFFmpeg } = require('../utils/ffmpeg');
+const { runFFmpeg, probeMediaDuration } = require('../utils/ffmpeg');
 
 class ProductionManagementAgent {
   constructor(db, credentials) {
@@ -320,40 +320,70 @@ class ProductionManagementAgent {
   }
 
   async generateVideoContent(productionData, onProgress = () => {}) {
-    this.logger.info('Generating AI video content...');
+    this.logger.info('Generating cinematic hybrid video content...');
     
     try {
       const { strategy, script } = productionData;
       
-      // Generate visual assets using DALL-E
       const requestedScenes = Math.min(180, Math.max(3, Number(productionData.settings?.sceneCount) || 8));
       const basePrompts = this.createVisualPromptsFromScript(script);
       const visualPrompts = Array.from({ length: requestedScenes }, (_, index) => `${basePrompts[index % basePrompts.length]}, cena ${index + 1} de ${requestedScenes}, composição visual distinta`);
       const visualAssets = [];
       const uploadedVisuals = [];
+      const sceneAssets = [];
+      const usedStockIds = new Set();
+      const sceneDirectory = path.join(__dirname, '..', 'data', 'assets', productionData.id, 'scenes');
+      await fs.mkdir(sceneDirectory, { recursive: true });
       
       for (let index = 0; index < visualPrompts.length; index += 1) {
         const prompt = visualPrompts[index];
-        const assets = await this.aiVideoGenerator.generateVisualAssets(prompt, 'ethereal', 1);
-        visualAssets.push(...assets);
+        let scene;
+        if (this.aiVideoGenerator.hasStockVideoProvider()) {
+          try {
+            const clipPath = path.join(sceneDirectory, `scene-${String(index + 1).padStart(4, '0')}.mp4`);
+            scene = await this.aiVideoGenerator.fetchStockVideo(prompt, clipPath, usedStockIds);
+          } catch (error) {
+            this.logger.warn(`Stock video unavailable for scene ${index + 1}: ${error.message}`);
+          }
+        }
+
+        if (!scene) {
+          const assets = await this.aiVideoGenerator.generateVisualAssets(prompt, 'cinematic', 1);
+          scene = { path: assets[0], provider: this.aiVideoGenerator.imageProvider || 'image', type: 'image' };
+        } else {
+          scene.type = 'video';
+        }
+
+        visualAssets.push(scene.path);
+        sceneAssets.push(scene);
         let uploaded = null;
-        if (this.storage.enabled && assets[0]) {
-          uploaded = await this.storage.upload(assets[0], `productions/${productionData.id}/scenes/scene-${String(index + 1).padStart(4, '0')}.png`, 'image/png');
+        if (this.storage.enabled && scene.path) {
+          const extension = scene.type === 'video' ? 'mp4' : 'png';
+          const contentType = scene.type === 'video' ? 'video/mp4' : 'image/png';
+          uploaded = await this.storage.upload(scene.path, `productions/${productionData.id}/scenes/scene-${String(index + 1).padStart(4, '0')}.${extension}`, contentType);
           uploadedVisuals.push(uploaded);
         }
         const completed = index + 1;
         const progress = 66 + Math.floor((completed / requestedScenes) * 8);
-        onProgress('visuals', progress, `Cena ${completed} de ${requestedScenes} criada${uploaded ? ' e enviada para o R2' : ''}`, { asset: 'scene', completed, total: requestedScenes, objectKey: uploaded?.key || null });
+        const mediaLabel = scene.type === 'video' ? 'Clipe' : 'Imagem de contingência';
+        onProgress('visuals', progress, `${mediaLabel} ${completed} de ${requestedScenes} preparado${uploaded ? ' e enviado para o R2' : ''}`, { asset: 'scene', mediaType: scene.type, provider: scene.provider, completed, total: requestedScenes, objectKey: uploaded?.key || null });
+      }
+
+      const movingScenes = sceneAssets.filter(scene => scene.type === 'video').length;
+      const minimumMovingScenes = Math.ceil(requestedScenes * 0.5);
+      if (movingScenes < minimumMovingScenes) {
+        throw new Error(`A produção encontrou somente ${movingScenes} clipes em movimento para ${requestedScenes} cenas. São necessários pelo menos ${minimumMovingScenes} clipes para manter o formato cinematográfico.`);
       }
       
       productionData.assets.video = {
         visualAssets: visualAssets,
         uploadedVisuals,
+        sceneAssets,
         duration: productionData.estimatedDuration,
         format: 'mp4',
         resolution: '1920x1080',
         fps: 30,
-        generatedWith: 'AI'
+        generatedWith: 'Hybrid'
       };
       
       productionData.timeline.videoGenerated = new Date().toISOString();
@@ -468,10 +498,20 @@ class ProductionManagementAgent {
         const progress = 75 + Math.floor((completed / Math.max(1, total)) * 6);
         onProgress('narration', progress, `Narração ${completed} de ${total} processada`, { asset: 'audio', completed, total });
       });
+
+      const actualDuration = await probeMediaDuration(audioPath);
+      const targetMinutes = Number(productionData.settings?.targetMinutes || productionData.estimatedDuration || 0);
+      const targetDuration = targetMinutes > 0 ? targetMinutes * 60 : null;
+      const tolerance = targetDuration ? Math.max(15, targetDuration * 0.2) : null;
+      if (targetDuration && Math.abs(actualDuration - targetDuration) > tolerance) {
+        const actualMinutes = (actualDuration / 60).toFixed(1).replace('.', ',');
+        throw new Error(`A narração resultou em ${actualMinutes} minutos, fora da duração solicitada de ${targetMinutes} minutos. Revise ou amplie o roteiro antes de tentar novamente.`);
+      }
       
       productionData.assets.audio = {
         path: audioPath,
-        duration: productionData.estimatedDuration,
+        duration: actualDuration,
+        targetDuration,
         format: 'mp3',
         generatedWith: 'AI',
         quality: 'high'
@@ -630,12 +670,14 @@ class ProductionManagementAgent {
       const stats = await fs.stat(finalVideoPath);
       if (stats.size < 10000) throw new Error('O arquivo final é pequeno demais para ser um vídeo válido.');
       await runFFmpeg(['-v', 'error', '-i', finalVideoPath, '-f', 'null', '-']);
+      const actualDuration = await probeMediaDuration(finalVideoPath);
       
       productionData.assets.finalVideo = {
         path: finalVideoPath,
         fileSize: stats.size,
-        duration: productionData.estimatedDuration,
-        generatedWith: 'AI',
+        duration: actualDuration,
+        requestedDuration: Number(productionData.settings?.targetMinutes || productionData.estimatedDuration || 0) * 60,
+        generatedWith: productionData.assets.video?.generatedWith || 'Hybrid',
         resolution: '1920x1080',
         format: 'mp4'
       };

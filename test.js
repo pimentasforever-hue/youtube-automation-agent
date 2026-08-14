@@ -28,7 +28,7 @@ class SystemTest {
       { name: 'FFmpeg Resolution', test: () => this.testFFmpegResolution() },
       { name: 'Gemini Media Provider Selection', test: () => this.testGeminiMediaProvider() },
       { name: 'Cloudflare Image Provider', test: () => this.testCloudflareImageProvider() },
-      { name: 'Slideshow Renderer', test: () => this.testSlideshowRenderer() },
+      { name: 'Cinematic Hybrid Renderer', test: () => this.testHybridRenderer() },
       { name: 'Evergreen Template Topics', test: () => this.testEvergreenTopics() },
       { name: 'Walkthrough Module', test: () => this.testWalkthroughModule() },
       { name: 'Logger System', test: () => this.testLogger() },
@@ -609,57 +609,51 @@ class SystemTest {
     this.logger.info('Cloudflare image provider test completed successfully');
   }
 
-  async testSlideshowRenderer() {
+  async testHybridRenderer() {
     const { AIVideoGenerator } = require('./utils/ai-video-generator');
-    const { checkFFmpeg } = require('./utils/ffmpeg');
+    const { checkFFmpeg, runFFmpeg, probeMediaDuration } = require('./utils/ffmpeg');
     const fs = require('fs').promises;
     const os = require('os');
 
     if (!(await checkFFmpeg())) {
-      this.logger.warn('FFmpeg unavailable , skipping slideshow renderer test');
+      this.logger.warn('FFmpeg unavailable , skipping cinematic renderer test');
       return;
     }
 
     const sharp = require('sharp');
-    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'yaa-slides-'));
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'yaa-hybrid-'));
 
     try {
-      const stills = [];
-      for (let i = 0; i < 3; i++) {
-        const stillPath = path.join(dir, `slide_${i}.png`);
-        await sharp({
-          create: { width: 320, height: 180, channels: 3, background: { r: 60 * i, g: 80, b: 160 } }
-        }).png().toFile(stillPath);
-        stills.push(stillPath);
-      }
-
       const generator = new AIVideoGenerator({});
-      const slideDir = path.join(dir, 'slides');
-      const generatedSlides = await generator.createSlideStills({ title: 'História para testar a montagem' }, stills, slideDir);
-      const slideMetadata = await sharp(generatedSlides[0]).metadata();
-      if (generatedSlides.length !== stills.length || slideMetadata.width !== 1920 || slideMetadata.height !== 1080) {
-        throw new Error('Server-side slide composition did not create valid 1920x1080 images');
-      }
-      const videoPath = path.join(dir, 'out.mp4');
-      await generator.renderSlidesToVideo(stills, 6, videoPath);
+      const stillPath = path.join(dir, 'fallback.png');
+      const clipPath = path.join(dir, 'clip.mp4');
+      const audioPath = path.join(dir, 'narration.m4a');
+      await sharp({ create: { width: 640, height: 360, channels: 3, background: { r: 35, g: 80, b: 145 } } }).png().toFile(stillPath);
+      await runFFmpeg(['-y', '-f', 'lavfi', '-i', 'color=c=0x754020:s=640x360:r=30:d=2', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', clipPath]);
+      await runFFmpeg(['-y', '-f', 'lavfi', '-i', 'sine=frequency=440:duration=4', '-c:a', 'aac', audioPath]);
 
-      const stats = await fs.stat(videoPath);
-      if (!stats.size) {
-        throw new Error('Rendered slideshow video is empty');
+      const query = generator.normalizeStockQuery('A Bíblia e a oração no deserto, cena cinematográfica');
+      if (!query.includes('biblical') || !query.includes('prayer') || !query.includes('desert')) {
+        throw new Error(`Stock query was not normalized for the provider: ${query}`);
       }
 
-      // Silent fallback: an unusable audio path must still yield a playable output
+      const videoPath = path.join(dir, 'visual.mp4');
       const finalPath = path.join(dir, 'final.mp4');
-      await generator.addAudioToVideo(videoPath, path.join(dir, 'missing.mp3'), finalPath);
+      await generator.renderMediaTimeline([clipPath, stillPath], 4, videoPath, path.join(dir, 'timeline'));
+      await generator.addAudioToVideo(videoPath, audioPath, finalPath, 4);
       const finalStats = await fs.stat(finalPath);
       if (!finalStats.size) {
-        throw new Error('Silent-audio fallback did not produce a video');
+        throw new Error('Cinematic hybrid renderer did not produce a video');
+      }
+      const duration = await probeMediaDuration(finalPath);
+      if (Math.abs(duration - 4) > 0.5) {
+        throw new Error(`Final duration should follow narration. Received ${duration} seconds.`);
       }
     } finally {
       await fs.rm(dir, { recursive: true, force: true }).catch(() => {});
     }
 
-    this.logger.info('Slideshow renderer test completed successfully');
+    this.logger.info('Cinematic hybrid renderer test completed successfully');
   }
 
   async testEvergreenTopics() {

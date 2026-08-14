@@ -759,6 +759,10 @@ class YouTubeAutomationAgent {
       const result = {
         youtube: { connected: false, authorized: Boolean(this.credentials.tokens?.youtube) },
         ai: { connected: this.credentials.hasAITextProvider(), provider: process.env.GEMINI_API_KEY ? 'Gemini' : process.env.OPENAI_API_KEY ? 'OpenAI' : null },
+        stockVideo: {
+          connected: this.agents.production.aiVideoGenerator.hasStockVideoProvider(),
+          provider: this.agents.production.aiVideoGenerator.stockVideoProvider === 'pexels' ? 'Pexels' : this.agents.production.aiVideoGenerator.stockVideoProvider === 'pixabay' ? 'Pixabay' : null
+        },
         storage: storageStatus,
         database: { connected: true, provider: this.db.isPostgres ? 'PostgreSQL' : 'SQLite', managedBy: this.db.isPostgres ? 'Railway' : 'Aplicação' },
         queue: this.productionQueue?.status() || { connected: false, provider: 'Fila local' }
