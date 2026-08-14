@@ -684,6 +684,7 @@ class YouTubeAutomationAgent {
           serverTime: new Date().toISOString(),
           job: job ? this.decorateProductionJob(job) : null,
           events,
+          queue: this.productionQueue?.status() || { connected: false, provider: 'Fila local' },
           storage
         });
       } catch (error) {

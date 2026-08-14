@@ -146,8 +146,24 @@ function renderContents() {
 
 function openContent(id) {
   const item = contentItems.find((content) => content.id === id);
-  if (!item) return;
+  if (!item) {
+    selectedContentId = id;
+    $('detail-title').textContent = 'Produção sem conteúdo final';
+    $('detail-status').textContent = 'Verificando trabalho';
+    $('detail-meta').textContent = `ID ${id}`;
+    $('video-frame').innerHTML = '<div class="video-empty"><strong>O vídeo não chegou a ser criado</strong><p>Os registros abaixo mostram até onde o servidor conseguiu trabalhar.</p></div>';
+    $('retry-content-button').hidden = true;
+    $('edit-content-button').hidden = true;
+    $('delete-content-button').hidden = true;
+    $('edit-content-form').hidden = true;
+    showView('detail');
+    window.history.replaceState(null, '', `/conteudos/${encodeURIComponent(id)}`);
+    loadProductionDetail(id);
+    return;
+  }
   selectedContentId = id;
+  $('edit-content-button').hidden = false;
+  $('delete-content-button').hidden = false;
   $('detail-title').textContent = item.title;
   $('detail-status').textContent = statusLabels[item.status] || item.status;
   $('detail-meta').textContent = `${item.topic} · ${item.duration || 'Duração não informada'} · ${formatDate(item.createdAt)}`;
@@ -211,7 +227,7 @@ function renderProductionDetail(data) {
   $('detail-worker-status').textContent = operationalLabels[job?.operational] || 'Sem trabalho confirmado';
   $('detail-worker-status').dataset.state = job?.operational || 'unconfirmed';
   $('detail-worker-heartbeat').textContent = job?.heartbeatAt ? `Última resposta às ${formatLogTime(job.heartbeatAt)}` : 'O worker ainda não respondeu';
-  $('detail-queue-status').textContent = job?.result?.queueMode === 'redis' ? 'Redis com BullMQ' : job ? 'Fila local' : 'Sem trabalho associado';
+  $('detail-queue-status').textContent = data.queue?.provider || (job?.result?.queueMode === 'redis' ? 'Redis com BullMQ' : job ? 'Fila local' : 'Sem trabalho associado');
   $('detail-job-id').textContent = job?.id || 'Sem ID de trabalho';
   $('detail-storage-status').textContent = storage.connected ? storage.publicPlayback ? 'Conectado e reproduzível' : 'Conectado sem URL pública' : storage.configured ? 'Falha na conexão' : 'Não configurado';
   const objects = Array.isArray(storage.objects) ? storage.objects : [];
