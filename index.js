@@ -321,7 +321,10 @@ class YouTubeAutomationAgent {
     });
     this.app.use('/index.html', this.requireAuth());
     this.app.get('/login.html', (_req, res) => res.redirect('/login'));
-    this.app.use(express.static(path.join(__dirname, 'dashboard'), { index: false }));
+    this.app.use(express.static(path.join(__dirname, 'dashboard'), {
+      index: false,
+      setHeaders: (res) => res.setHeader('Cache-Control', 'no-store, max-age=0')
+    }));
 
     if (!process.env.AUTH_USERNAME || !process.env.AUTH_PASSWORD_HASH || !process.env.SESSION_SECRET) {
       throw new Error('AUTH_USERNAME, AUTH_PASSWORD_HASH, and SESSION_SECRET are required');
