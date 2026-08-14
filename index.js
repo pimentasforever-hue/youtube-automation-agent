@@ -502,7 +502,9 @@ class YouTubeAutomationAgent {
           const words = script.split(/\s+/).filter(Boolean).length;
           const paragraphs = script.split(/\n\s*\n/).filter((part) => part.trim()).length;
           const minutes = Math.max(1, Math.round(words / 140));
-          const report = `Resumo\nO roteiro tem ${words.toLocaleString('pt-BR')} palavras, ${paragraphs} parágrafos e cerca de ${minutes} minutos de narração.\n\nPontos fortes\nO texto foi recebido corretamente e está pronto para uma revisão editorial completa.\n\nCorreções prioritárias\nO serviço de revisão aprofundada está temporariamente ocupado. A fidelidade bíblica, as repetições e a coerência entre trechos ainda precisam ser verificadas pela IA.\n\nSugestões de melhoria\nMantenha parágrafos curtos, apresente o conflito nos primeiros segundos e encerre cada bloco com uma transição clara para a próxima cena.`;
+          const paragraphLabel = paragraphs === 1 ? 'parágrafo' : 'parágrafos';
+          const minuteLabel = minutes === 1 ? 'minuto' : 'minutos';
+          const report = `Resumo\nO roteiro tem ${words.toLocaleString('pt-BR')} palavras, ${paragraphs} ${paragraphLabel} e cerca de ${minutes} ${minuteLabel} de narração.\n\nPontos fortes\nO texto foi recebido corretamente e está pronto para uma revisão editorial completa.\n\nCorreções prioritárias\nO serviço de revisão aprofundada está temporariamente ocupado. A fidelidade bíblica, as repetições e a coerência entre trechos ainda precisam ser verificadas pela IA.\n\nSugestões de melhoria\nMantenha parágrafos curtos, apresente o conflito nos primeiros segundos e encerre cada bloco com uma transição clara para a próxima cena.`;
           return res.json({ success: true, report, sampled: script.length > 120000, reviewedCharacters: sample.length, totalCharacters: script.length, limited: true });
         }
       } catch (error) {
