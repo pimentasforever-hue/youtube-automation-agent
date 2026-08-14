@@ -357,7 +357,9 @@ $('review-script-button').addEventListener('click', async () => {
     $('script-review-content').textContent = result.report;
     $('script-review').hidden = false;
     message.className = 'form-message success';
-    message.textContent = result.sampled ? `Revisão concluída por amostragem de ${Number(result.reviewedCharacters).toLocaleString('pt-BR')} caracteres.` : 'Revisão concluída.';
+    message.textContent = result.limited
+      ? 'Revisão básica concluída. A análise aprofundada poderá ser refeita quando a IA estiver disponível.'
+      : result.sampled ? `Revisão concluída por amostragem de ${Number(result.reviewedCharacters).toLocaleString('pt-BR')} caracteres.` : 'Revisão concluída.';
   } catch (error) {
     message.className = 'form-message error';
     message.textContent = error.message;

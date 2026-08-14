@@ -488,8 +488,23 @@ class YouTubeAutomationAgent {
         const sample = script.length <= 120000
           ? script
           : `${script.slice(0, 40000)}\n\n[MEIO DO ROTEIRO]\n${script.slice(Math.floor(script.length / 2) - 20000, Math.floor(script.length / 2) + 20000)}\n\n[FINAL DO ROTEIRO]\n${script.slice(-40000)}`;
-        const report = await reviewer.generateText(`Você é um editor profissional de roteiros bíblicos para YouTube. Revise o texto abaixo em português do Brasil. Analise fidelidade e coerência bíblica, clareza, estrutura narrativa, ritmo para narração, repetições, linguagem, retenção e possíveis afirmações que precisam de verificação. Não reescreva o roteiro inteiro. Entregue um relatório prático com: Resumo, Pontos fortes, Correções prioritárias e Sugestões de melhoria. Informe claramente quando a análise tiver sido feita por amostragem.\n\nTamanho total: ${script.length} caracteres.\n\nROTEIRO:\n${sample}`, { maxTokens: 2400, temperature: 0.3 });
-        return res.json({ success: true, report, sampled: script.length > 120000, reviewedCharacters: sample.length, totalCharacters: script.length });
+        const prompt = `Você é um editor profissional de roteiros bíblicos para YouTube. Revise o texto abaixo em português do Brasil. Analise fidelidade e coerência bíblica, clareza, estrutura narrativa, ritmo para narração, repetições, linguagem, retenção e possíveis afirmações que precisam de verificação. Não reescreva o roteiro inteiro. Entregue um relatório prático com: Resumo, Pontos fortes, Correções prioritárias e Sugestões de melhoria. Informe claramente quando a análise tiver sido feita por amostragem. Não use travessão.\n\nTamanho total: ${script.length} caracteres.\n\nROTEIRO:\n${sample}`;
+        try {
+          let report;
+          try {
+            report = await reviewer.generateText(prompt, { maxTokens: 2400, temperature: 0.3 });
+          } catch (_firstAttemptError) {
+            await new Promise((resolve) => setTimeout(resolve, 1200));
+            report = await reviewer.generateText(prompt, { maxTokens: 2400, temperature: 0.3 });
+          }
+          return res.json({ success: true, report: String(report).replace(/[\u2013\u2014]/g, ','), sampled: script.length > 120000, reviewedCharacters: sample.length, totalCharacters: script.length });
+        } catch (_aiError) {
+          const words = script.split(/\s+/).filter(Boolean).length;
+          const paragraphs = script.split(/\n\s*\n/).filter((part) => part.trim()).length;
+          const minutes = Math.max(1, Math.round(words / 140));
+          const report = `Resumo\nO roteiro tem ${words.toLocaleString('pt-BR')} palavras, ${paragraphs} parágrafos e cerca de ${minutes} minutos de narração.\n\nPontos fortes\nO texto foi recebido corretamente e está pronto para uma revisão editorial completa.\n\nCorreções prioritárias\nO serviço de revisão aprofundada está temporariamente ocupado. A fidelidade bíblica, as repetições e a coerência entre trechos ainda precisam ser verificadas pela IA.\n\nSugestões de melhoria\nMantenha parágrafos curtos, apresente o conflito nos primeiros segundos e encerre cada bloco com uma transição clara para a próxima cena.`;
+          return res.json({ success: true, report, sampled: script.length > 120000, reviewedCharacters: sample.length, totalCharacters: script.length, limited: true });
+        }
       } catch (error) {
         return res.status(500).json({ success: false, error: error.message });
       }
