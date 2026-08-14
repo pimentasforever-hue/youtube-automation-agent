@@ -88,8 +88,10 @@
         <div class="view-heading"><div><h2 id="create-title">Criar conteúdo</h2><p>Defina o assunto. O sistema cuida das etapas de produção.</p></div></div>
         <article class="surface creation-panel">
           <form id="generate-form">
-            <label for="topic">Tema ou passagem</label>
-            <textarea id="topic" name="topic" rows="4" maxlength="200" placeholder="Exemplo: A coragem de Davi diante de Golias"></textarea>
+            <div class="script-label-row"><div><label for="script-input">Roteiro</label><p>Escreva ou cole o texto completo que será usado na produção.</p></div><span id="script-counter" aria-live="polite">0 / 5.500.000</span></div>
+            <textarea id="script-input" name="script" class="script-editor" rows="16" maxlength="5500000" placeholder="Cole seu roteiro aqui. Você pode começar com o título e organizar o texto em parágrafos."></textarea>
+            <div class="script-actions"><button class="secondary-button" id="review-script-button" type="button"><span>Revisar com IA</span></button><small>A IA analisa coerência, clareza, ritmo, repetições e pontos que precisam de verificação.</small></div>
+            <section id="script-review" class="script-review" aria-live="polite" hidden><div class="script-review-heading"><div><p class="eyebrow">Revisão por IA</p><h3>Relatório editorial</h3></div><button class="text-button" id="close-script-review" type="button">Fechar</button></div><div id="script-review-content"></div></section>
             <div class="form-row">
               <div><label for="style">Formato</label><select id="style" name="style"><option value="story">História narrada</option><option value="educational">Estudo bíblico</option><option value="explainer">Explicação</option><option value="list">Lista temática</option></select></div>
               <div><label for="target-minutes">Duração aproximada em minutos</label><input id="target-minutes" name="targetMinutes" type="number" min="1" max="30" value="8" required></div>

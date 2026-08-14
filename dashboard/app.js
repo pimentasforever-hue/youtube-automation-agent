@@ -151,12 +151,15 @@ function updateConnections(data) {
 function updateJobs(jobs) {
   const latest = (jobs || [])[0];
   const active = (jobs || []).find((job) => !['completed', 'failed'].includes(job.stage));
-  $('production-panel').hidden = !active;
-  if (active) {
-    $('production-stage').textContent = active.message;
-    $('production-message').textContent = `Etapa atual: ${active.stage}`;
-    $('production-percent').textContent = `${active.progress}%`;
-    $('production-progress').style.width = `${active.progress}%`;
+  const overviewJob = active || latest;
+  $('production-panel').hidden = !overviewJob;
+  if (overviewJob) {
+    $('production-stage').textContent = overviewJob.message;
+    $('production-message').textContent = overviewJob.stage === 'failed'
+      ? 'Essa produção foi interrompida e não está mais sendo processada. Abra Criar conteúdo para iniciar novamente.'
+      : overviewJob.stage === 'completed' ? 'A produção foi concluída e está disponível em Conteúdos.' : `Etapa atual: ${overviewJob.stage}`;
+    $('production-percent').textContent = `${overviewJob.progress}%`;
+    $('production-progress').style.width = `${overviewJob.progress}%`;
   }
 
   let dock = $('global-production-status');
@@ -225,6 +228,44 @@ $('status-filter').addEventListener('change', renderContents);
 $('refresh-button').addEventListener('click', loadDashboard);
 $('logout-button').addEventListener('click', async () => { await fetch('/api/auth/logout', { method: 'POST' }); window.location.assign('/login'); });
 
+const SCRIPT_LIMIT = 5500000;
+function updateScriptCounter() {
+  $('script-counter').textContent = `${$('script-input').value.length.toLocaleString('pt-BR')} / ${SCRIPT_LIMIT.toLocaleString('pt-BR')}`;
+}
+$('script-input').addEventListener('input', updateScriptCounter);
+updateScriptCounter();
+$('close-script-review').addEventListener('click', () => { $('script-review').hidden = true; });
+$('review-script-button').addEventListener('click', async () => {
+  const button = $('review-script-button');
+  const script = $('script-input').value.trim();
+  const message = $('form-message');
+  if (!script) {
+    message.className = 'form-message error';
+    message.textContent = 'Escreva ou cole um roteiro antes de solicitar a revisão.';
+    $('script-input').focus();
+    return;
+  }
+  button.disabled = true;
+  button.querySelector('span').textContent = 'Revisando';
+  message.className = 'form-message';
+  message.textContent = 'A IA está analisando o roteiro.';
+  try {
+    const response = await request('/api/review-script', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ script }) });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || 'Não foi possível revisar o roteiro.');
+    $('script-review-content').textContent = result.report;
+    $('script-review').hidden = false;
+    message.className = 'form-message success';
+    message.textContent = result.sampled ? `Revisão concluída por amostragem de ${Number(result.reviewedCharacters).toLocaleString('pt-BR')} caracteres.` : 'Revisão concluída.';
+  } catch (error) {
+    message.className = 'form-message error';
+    message.textContent = error.message;
+  } finally {
+    button.disabled = false;
+    button.querySelector('span').textContent = 'Revisar com IA';
+  }
+});
+
 $('generate-form').addEventListener('submit', async (event) => {
   event.preventDefault();
   const button = $('generate-button');
@@ -234,12 +275,13 @@ $('generate-form').addEventListener('submit', async (event) => {
   message.className = 'form-message';
   message.textContent = 'A produção começou. Esta etapa pode levar alguns minutos.';
   try {
-    const response = await request('/generate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ topic: $('topic').value.trim() || null, style: $('style').value, targetMinutes: Number($('target-minutes').value), sceneCount: Number($('scene-count').value), privacy: $('privacy').value, narration: $('narration').checked, captions: $('captions').checked, autoPublish: $('auto-publish').checked }) });
+    const response = await request('/generate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ script: $('script-input').value.trim() || null, style: $('style').value, targetMinutes: Number($('target-minutes').value), sceneCount: Number($('scene-count').value), privacy: $('privacy').value, narration: $('narration').checked, captions: $('captions').checked, autoPublish: $('auto-publish').checked }) });
     const result = await response.json();
     if (!response.ok) throw new Error(result.error || 'Não foi possível iniciar a produção.');
     message.className = 'form-message success';
     message.textContent = 'Produção iniciada. Você pode acompanhar o progresso na visão geral.';
-    $('topic').value = '';
+    $('script-input').value = '';
+    updateScriptCounter();
     await loadDashboard();
     showView('overview');
   } catch (error) {

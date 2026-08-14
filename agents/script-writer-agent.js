@@ -99,6 +99,32 @@ class ScriptWriterAgent {
     }
   }
 
+  async createScriptFromText(text, strategy, options = {}) {
+    const paragraphs = String(text).split(/\n{2,}/).map((part) => part.trim()).filter(Boolean);
+    const titleLine = paragraphs[0]?.split(/\r?\n/)[0]?.replace(/^#+\s*/, '').trim() || strategy.topic;
+    const words = String(text).trim().split(/\s+/).filter(Boolean).length;
+    const script = {
+      title: titleLine.slice(0, 100),
+      hook: { type: 'provided', text: paragraphs[0]?.slice(0, 500) || titleLine, duration: '0:00' },
+      introduction: { type: 'provided', text: '' },
+      mainContent: {
+        sections: paragraphs.map((content, index) => ({ type: 'provided', title: `Parte ${index + 1}`, content: [content], duration: Math.max(1, Math.round(content.split(/\s+/).length / 2.3)) })),
+        totalDuration: Math.max(1, Math.round(words / 2.3))
+      },
+      conclusion: { type: 'provided', text: '' },
+      callToAction: { type: 'provided', text: '' },
+      fullScript: String(text).trim(),
+      duration: `${Math.max(1, Math.round(words / 140))} minutes`,
+      tone: strategy.contentType || 'narrative',
+      pacing: 'provided',
+      keywords: strategy.keywords || [],
+      metadata: { strategy, generatedAt: new Date().toISOString(), version: '1.0', generationSource: 'user' }
+    };
+    if (options.targetMinutes) script.metadata.targetMinutes = options.targetMinutes;
+    await this.db.saveScript(script);
+    return script;
+  }
+
   async generateScriptWithAI(strategy, template, options = {}) {
     if (!this.aiTextService.isAvailable()) {
       this.logger.info('Using template script generation because no AI text provider is configured');

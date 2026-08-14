@@ -237,6 +237,7 @@ class YouTubeAutomationAgent {
 
     const value = {
       topic: null,
+      script: null,
       style: null,
       length: typeof body.length === 'string' ? body.length : 'medium',
       targetMinutes: Number(body.targetMinutes || 8),
@@ -272,6 +273,14 @@ class YouTubeAutomationAgent {
       value.topic = topic || null;
     }
 
+    if (body.script !== undefined && body.script !== null) {
+      if (typeof body.script !== 'string') return { valid: false, status: 400, error: 'script must be a string' };
+      const script = body.script.trim();
+      if (script.length > 5500000) return { valid: false, status: 413, error: 'O roteiro ultrapassa o limite de 5.500.000 caracteres.' };
+      value.script = script || null;
+      if (!value.topic && script) value.topic = script.split(/\r?\n/).find(Boolean)?.slice(0, 180) || 'Roteiro enviado';
+    }
+
     if (body.style !== undefined && body.style !== null) {
       if (typeof body.style !== 'string') {
         return { valid: false, status: 400, error: 'style must be a string' };
@@ -302,7 +311,7 @@ class YouTubeAutomationAgent {
   }
   setupAPI() {
     this.app.set('trust proxy', 1);
-    this.app.use(express.json({ limit: '1mb' }));
+    this.app.use(express.json({ limit: '6mb' }));
     this.app.use((_req, res, next) => {
       res.setHeader('Content-Security-Policy', "default-src 'self'; img-src 'self' data: https:; media-src 'self' https://media.gate-arcana.digital https://*.r2.dev; style-src 'self'; script-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'");
       res.setHeader('Referrer-Policy', 'no-referrer');
@@ -466,6 +475,23 @@ class YouTubeAutomationAgent {
       }
     });
 
+    this.app.post('/api/review-script', this.requireAuth(), async (req, res) => {
+      try {
+        const script = typeof req.body?.script === 'string' ? req.body.script.trim() : '';
+        if (!script) return res.status(400).json({ success: false, error: 'Cole ou escreva um roteiro para revisar.' });
+        if (script.length > 5500000) return res.status(413).json({ success: false, error: 'O roteiro ultrapassa o limite de 5.500.000 caracteres.' });
+        const reviewer = this.agents.scriptWriter.aiTextService;
+        if (!reviewer?.isAvailable()) return res.status(503).json({ success: false, error: 'A IA de revisão ainda não está configurada.' });
+        const sample = script.length <= 120000
+          ? script
+          : `${script.slice(0, 40000)}\n\n[MEIO DO ROTEIRO]\n${script.slice(Math.floor(script.length / 2) - 20000, Math.floor(script.length / 2) + 20000)}\n\n[FINAL DO ROTEIRO]\n${script.slice(-40000)}`;
+        const report = await reviewer.generateText(`Você é um editor profissional de roteiros bíblicos para YouTube. Revise o texto abaixo em português do Brasil. Analise fidelidade e coerência bíblica, clareza, estrutura narrativa, ritmo para narração, repetições, linguagem, retenção e possíveis afirmações que precisam de verificação. Não reescreva o roteiro inteiro. Entregue um relatório prático com: Resumo, Pontos fortes, Correções prioritárias e Sugestões de melhoria. Informe claramente quando a análise tiver sido feita por amostragem.\n\nTamanho total: ${script.length} caracteres.\n\nROTEIRO:\n${sample}`, { maxTokens: 2400, temperature: 0.3 });
+        return res.json({ success: true, report, sampled: script.length > 120000, reviewedCharacters: sample.length, totalCharacters: script.length });
+      } catch (error) {
+        return res.status(500).json({ success: false, error: error.message });
+      }
+    });
+
     this.app.get('/production-status', this.requireAuth(), async (_req, res) => {
       try {
         const persisted = await this.db.getProductionJobs(20);
@@ -602,7 +628,9 @@ class YouTubeAutomationAgent {
     
     // Step 2: Script Writing
     if (jobId) this.updateProductionJob(jobId, 'script', 25, 'Escrevendo o roteiro');
-    const script = await this.agents.scriptWriter.generateScript(strategy, { targetMinutes: strategy.targetMinutes });
+    const script = options.script
+      ? await this.agents.scriptWriter.createScriptFromText(options.script, strategy, { targetMinutes: strategy.targetMinutes })
+      : await this.agents.scriptWriter.generateScript(strategy, { targetMinutes: strategy.targetMinutes });
     this.logger.info(`Script generated: ${script.title}`);
     
     // Step 3: Thumbnail Design
