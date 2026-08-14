@@ -572,7 +572,10 @@ class YouTubeAutomationAgent {
       script,
       thumbnail,
       seo: seoData,
-      options
+      options,
+      onProgress: (stage, progress, message) => {
+        if (jobId) this.updateProductionJob(jobId, stage, progress, message);
+      }
     });
     productionData.settings = options;
     this.logger.info('Production processing complete');
@@ -582,7 +585,7 @@ class YouTubeAutomationAgent {
     this.logger.info(`Content saved with ID: ${contentId}`);
 
     // Step 7: Add to the publish queue (skipped automatically for simulated output)
-    if (jobId) this.updateProductionJob(jobId, 'scheduling', 92, 'Salvando e preparando a publicação');
+    if (jobId) this.updateProductionJob(jobId, 'scheduling', 96, 'Salvando e preparando a publicação');
     const scheduleEntry = options.autoPublish === false ? null : await this.agents.publishing.scheduleContent(productionData);
     if (scheduleEntry) {
       this.logger.info(`Content queued for publishing at ${scheduleEntry.publishTime}`);

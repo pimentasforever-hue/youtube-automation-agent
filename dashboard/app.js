@@ -157,6 +157,15 @@ function updateJobs(jobs) {
   $('production-progress').style.width = `${active.progress}%`;
 }
 
+async function loadJobs() {
+  try {
+    const response = await request('/production-status');
+    if (response.ok) updateJobs(await response.json());
+  } catch (_error) {
+    // The full dashboard refresh handles connection state.
+  }
+}
+
 function updateContents(items) {
   contentItems = Array.isArray(items) ? items : [];
   $('sidebar-content-count').textContent = contentItems.length;
@@ -240,3 +249,4 @@ showView(window.location.hash.slice(1) || 'overview', false);
 loadDashboard();
 loadSettings();
 setInterval(loadDashboard, 30000);
+setInterval(loadJobs, 2000);

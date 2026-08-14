@@ -47,14 +47,16 @@ class CredentialManager {
   }
 
   async loadTokens() {
+    let loadedPersistedTokens = false;
     try {
       const data = await fs.readFile(this.tokensPath, 'utf8');
       this.tokens = JSON.parse(data);
+      loadedPersistedTokens = Boolean(this.tokens.youtube);
     } catch (error) {
       this.tokens = {};
     }
 
-    if (process.env.YOUTUBE_TOKENS_JSON) {
+    if (process.env.YOUTUBE_TOKENS_JSON && !loadedPersistedTokens) {
       try {
         this.tokens.youtube = JSON.parse(process.env.YOUTUBE_TOKENS_JSON);
       } catch (error) {

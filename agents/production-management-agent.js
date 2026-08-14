@@ -50,7 +50,7 @@ class ProductionManagementAgent {
     try {
       this.logger.info('Processing content for production...');
       
-      const { strategy, script, thumbnail, seo, options = {} } = contentData;
+      const { strategy, script, thumbnail, seo, options = {}, onProgress = () => {} } = contentData;
       
       // Create production entry
       const productionId = this.generateProductionId();
@@ -92,17 +92,26 @@ class ProductionManagementAgent {
       await this.db.saveProductionData(productionData);
       
       // Generate video content
+      onProgress('visuals', 66, 'Criando as cenas do vídeo');
       await this.generateVideoContent(productionData);
       
       // Generate audio narration
-      if (options.narration !== false) await this.generateAudioNarration(productionData);
+      if (options.narration !== false) {
+        onProgress('narration', 75, 'Gerando a narração');
+        await this.generateAudioNarration(productionData);
+      }
       
       // Generate captions
-      if (options.captions !== false) await this.generateCaptions(productionData);
+      if (options.captions !== false) {
+        onProgress('captions', 82, 'Sincronizando as legendas');
+        await this.generateCaptions(productionData);
+      }
       
       // Final assembly
+      onProgress('assembly', 88, 'Montando o vídeo final');
       await this.assembleVideo(productionData);
 
+      onProgress('storage', 92, 'Enviando o vídeo para o Cloudflare');
       await this.storage.uploadProductionAssets(productionData);
 
       // Mark as ready — or simulated, when no real video could be produced
