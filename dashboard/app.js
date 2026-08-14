@@ -12,7 +12,7 @@ const viewTitles = {
   settings: ['Sistema', 'Configurações'],
   detail: ['Biblioteca', 'Assistir conteúdo']
 };
-const statusLabels = { processing: 'Em produção', ready: 'Pronto', scheduled: 'Agendado', published: 'Publicado', simulated: 'Precisa de atenção', failed: 'Falhou', replaced: 'Substituído' };
+const statusLabels = { queued: 'Na fila', processing: 'Em produção', ready: 'Pronto', scheduled: 'Agendado', published: 'Publicado', simulated: 'Precisa de atenção', failed: 'Falhou', replaced: 'Substituído' };
 let contentItems = [];
 let selectedContentId = null;
 let reviewSuggestions = null;
@@ -151,7 +151,7 @@ function openContent(id) {
   $('detail-title').textContent = item.title;
   $('detail-status').textContent = statusLabels[item.status] || item.status;
   $('detail-meta').textContent = `${item.topic} · ${item.duration || 'Duração não informada'} · ${formatDate(item.createdAt)}`;
-  if (item.status === 'processing') renderProductionPlayer(item);
+  if (['queued', 'processing'].includes(item.status)) renderProductionPlayer(item);
   else if (item.videoUrl && ['ready', 'scheduled', 'published'].includes(item.status)) renderCustomPlayer(item);
   else $('video-frame').innerHTML = `<div class="video-empty"><strong>${['failed', 'simulated'].includes(item.status) ? 'A produção não gerou um vídeo válido' : 'Vídeo ainda indisponível'}</strong><p>${['failed', 'simulated'].includes(item.status) ? 'Use Tentar novamente para reiniciar a produção com o roteiro salvo.' : 'Quando a montagem terminar, o player aparecerá aqui.'}</p></div>`;
   $('edit-content-form').hidden = true;
@@ -159,6 +159,7 @@ function openContent(id) {
   $('retry-content-message').textContent = '';
   showView('detail');
   window.history.replaceState(null, '', `/conteudos/${encodeURIComponent(id)}`);
+  loadProductionDetail(id);
 }
 
 function formatMediaTime(seconds) {
@@ -192,9 +193,54 @@ function renderCustomPlayer(item) {
 }
 
 function renderProductionPlayer(item) {
-  const job = productionJobs.find(entry => `prod_${entry.id}` === item.id || entry.result?.retryOf === item.id);
+  const job = productionJobs.find(entry => entry.result?.contentId === item.id || entry.result?.productionId === item.id || `prod_${entry.id}` === item.id || entry.result?.retryOf === item.id);
   const progress = Math.max(0, Math.min(100, Number(job?.progress) || 0));
-  $('video-frame').innerHTML = `<div class="production-player" role="status" aria-live="polite" aria-atomic="true"><div class="production-player-orbit" aria-hidden="true"></div><strong>${progress}%</strong><span>${text(job?.message || 'Preparando a produção')}</span><div class="production-player-track"><i style="transform:scaleX(${progress / 100})"></i></div><small>O player será liberado quando o arquivo passar pela validação final.</small></div>`;
+  const stateMessage = job?.operational === 'working' ? job.message : job?.operational === 'queued' ? 'Aguardando um worker disponível' : job?.operational === 'unresponsive' ? 'O worker parou de responder. O sistema ainda não confirmou uma falha.' : job?.message || 'Aguardando confirmação do servidor';
+  $('video-frame').innerHTML = `<div class="production-player state-${text(job?.operational || 'unconfirmed')}" role="status" aria-live="polite" aria-atomic="true"><div class="production-player-orbit" aria-hidden="true"></div><strong>${progress}%</strong><span>${text(stateMessage)}</span><div class="production-player-track"><i style="transform:scaleX(${progress / 100})"></i></div><small>${job?.operational === 'working' ? 'O worker está respondendo. O player será liberado após validar o MP4 no R2.' : 'O percentual só muda quando o servidor confirma uma nova etapa.'}</small></div>`;
+}
+
+function formatLogTime(value) {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? 'Sem horário' : date.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+}
+
+function renderProductionDetail(data) {
+  const job = data.job;
+  const storage = data.storage || {};
+  const operationalLabels = { working: 'Trabalhando agora', queued: 'Aguardando worker', retrying: 'Nova tentativa', unresponsive: 'Sem resposta', completed: 'Concluído', failed: 'Falhou', unconfirmed: 'Não confirmado' };
+  $('detail-worker-status').textContent = operationalLabels[job?.operational] || 'Sem trabalho confirmado';
+  $('detail-worker-status').dataset.state = job?.operational || 'unconfirmed';
+  $('detail-worker-heartbeat').textContent = job?.heartbeatAt ? `Última resposta às ${formatLogTime(job.heartbeatAt)}` : 'O worker ainda não respondeu';
+  $('detail-queue-status').textContent = job?.result?.queueMode === 'redis' ? 'Redis com BullMQ' : job ? 'Fila local' : 'Sem trabalho associado';
+  $('detail-job-id').textContent = job?.id || 'Sem ID de trabalho';
+  $('detail-storage-status').textContent = storage.connected ? storage.publicPlayback ? 'Conectado e reproduzível' : 'Conectado sem URL pública' : storage.configured ? 'Falha na conexão' : 'Não configurado';
+  const objects = Array.isArray(storage.objects) ? storage.objects : [];
+  const totalBytes = objects.reduce((sum, object) => sum + Number(object.size || 0), 0);
+  $('detail-storage-objects').textContent = objects.length ? `${objects.length} ${objects.length === 1 ? 'objeto' : 'objetos'}, ${Math.max(1, Math.round(totalBytes / 1024)).toLocaleString('pt-BR')} KB confirmados` : storage.error ? `Erro: ${storage.error}` : 'Nenhum objeto confirmado para este ID';
+  const events = Array.isArray(data.events) ? data.events : [];
+  const visibleEvents = events.length ? events : job ? [{ id: 'current', level: job.stage === 'failed' ? 'error' : 'info', stage: job.stage, progress: job.progress, message: job.message, createdAt: job.updatedAt }] : [];
+  $('detail-log-count').textContent = `${visibleEvents.length} ${visibleEvents.length === 1 ? 'registro' : 'registros'}`;
+  $('detail-server-log').innerHTML = visibleEvents.length ? visibleEvents.slice().reverse().map((event) => {
+    const objectKey = event.details?.objectKey ? `<small>Objeto: ${text(event.details.objectKey)}</small>` : '';
+    const count = event.details?.completed && event.details?.total ? `<small>Item ${text(event.details.completed)} de ${text(event.details.total)}</small>` : '';
+    return `<li class="server-log-entry level-${text(event.level || 'info')}"><time datetime="${text(event.createdAt)}">${text(formatLogTime(event.createdAt))}</time><span class="server-log-level">${text(event.level === 'error' ? 'Erro' : event.level === 'warning' ? 'Atenção' : 'Servidor')}</span><div><strong>${text(event.message)}</strong><p>${text(event.stage)} · ${text(event.progress)}%</p>${objectKey}${count}</div></li>`;
+  }).join('') : '<li class="server-log-empty">Nenhum registro do servidor foi encontrado para este conteúdo.</li>';
+  if (selectedContentId) {
+    const item = contentItems.find((content) => content.id === selectedContentId);
+    if (item && ['queued', 'processing'].includes(item.status)) renderProductionPlayer(item);
+  }
+}
+
+async function loadProductionDetail(id = selectedContentId) {
+  if (!id) return;
+  try {
+    const response = await request(`/contents/${encodeURIComponent(id)}/production`);
+    if (!response.ok) throw new Error('Não foi possível consultar a produção.');
+    renderProductionDetail(await response.json());
+  } catch (error) {
+    $('detail-worker-status').textContent = 'Consulta indisponível';
+    $('detail-worker-heartbeat').textContent = error.message;
+  }
 }
 
 async function retryContent(id = selectedContentId, sourceButton = null) {
@@ -210,9 +256,9 @@ async function retryContent(id = selectedContentId, sourceButton = null) {
     const result = await response.json();
     if (!response.ok) throw new Error(result.error || 'Não foi possível tentar novamente.');
     message.className = 'form-message success';
-    message.textContent = 'Nova tentativa iniciada. Acompanhe o progresso na visão geral.';
+    message.textContent = 'Nova tentativa registrada. Acompanhe as confirmações do servidor nesta página.';
     await loadDashboard();
-    showView('overview');
+    openContent(result.contentId || id);
   } catch (error) {
     message.className = 'form-message error';
     message.textContent = error.message;
@@ -285,7 +331,7 @@ function updateJobs(jobs) {
   dock.querySelector('.production-dock-track i').style.width = `${shown.progress}%`;
   if (selectedContentId && document.querySelector('.app-view[data-view="detail"].active')) {
     const item = contentItems.find(content => content.id === selectedContentId);
-    if (item?.status === 'processing') renderProductionPlayer(item);
+    if (item && ['queued', 'processing'].includes(item.status)) renderProductionPlayer(item);
   }
 }
 
@@ -309,6 +355,7 @@ function connectProductionEvents() {
       const job = JSON.parse(event.data);
       const jobs = [job, ...productionJobs.filter(item => item.id !== job.id)].sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt));
       updateJobs(jobs);
+      if (selectedContentId && (job.result?.contentId === selectedContentId || job.result?.productionId === selectedContentId || job.result?.retryOf === selectedContentId || `prod_${job.id}` === selectedContentId)) loadProductionDetail(selectedContentId);
       if (['completed', 'failed'].includes(job.stage)) loadDashboard();
     } catch (_error) { /* Polling remains available. */ }
   });
@@ -356,6 +403,7 @@ $('refresh-button').addEventListener('click', loadDashboard);
 $('logout-button').addEventListener('click', async () => { await fetch('/api/auth/logout', { method: 'POST' }); window.location.assign('/login'); });
 $('edit-content-button').addEventListener('click', () => beginContentEdit());
 $('retry-content-button').addEventListener('click', () => retryContent());
+$('refresh-production-detail').addEventListener('click', () => loadProductionDetail());
 $('delete-content-button').addEventListener('click', () => confirmContentDelete());
 $('cancel-content-edit').addEventListener('click', () => { $('edit-content-form').hidden = true; });
 $('edit-content-form').addEventListener('submit', async (event) => {
@@ -499,11 +547,11 @@ $('generate-form').addEventListener('submit', async (event) => {
     const result = await response.json();
     if (!response.ok) throw new Error(result.error || 'Não foi possível iniciar a produção.');
     message.className = 'form-message success';
-    message.textContent = 'Produção iniciada. Você pode acompanhar o progresso na visão geral.';
+    message.textContent = 'Produção registrada. Abrindo as confirmações do servidor.';
     $('script-input').value = '';
     updateScriptCounter();
     await loadDashboard();
-    showView('overview');
+    openContent(result.contentId);
   } catch (error) {
     message.className = 'form-message error';
     message.textContent = error.message || 'Não foi possível iniciar a produção.';
@@ -566,3 +614,4 @@ loadSettings();
 connectProductionEvents();
 setInterval(loadDashboard, 30000);
 setInterval(loadJobs, 10000);
+setInterval(() => { if (selectedContentId && document.querySelector('.app-view[data-view="detail"].active')) loadProductionDetail(selectedContentId); }, 10000);

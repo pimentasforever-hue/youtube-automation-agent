@@ -19,6 +19,8 @@ class SystemTest {
       { name: 'Database Connection', test: () => this.testDatabase() },
       { name: 'Production Persistence', test: () => this.testProductionPersistence() },
       { name: 'Automation Events Table', test: () => this.testAutomationEventsTable() },
+      { name: 'Production Observability', test: () => this.testProductionObservability() },
+      { name: 'Validated Completion Guard', test: () => this.testValidatedCompletionGuard() },
       { name: 'API Validation and Security', test: () => this.testAPIValidationAndSecurity() },
       { name: 'Publishing Safety', test: () => this.testPublishingSafety() },
       { name: 'Multi-Provider Credential Validation', test: () => this.testCredentialValidation() },
@@ -152,6 +154,48 @@ class SystemTest {
     await db.executeQuery('DELETE FROM automation_events WHERE event_type = ?', ['test_event']);
     await db.close();
     this.logger.info('Automation events table test completed successfully');
+  }
+
+  async testProductionObservability() {
+    const db = new Database();
+    await db.initialize();
+    const suffix = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const jobId = `job_observability_${suffix}`;
+    const contentId = `prod_${jobId}`;
+    await db.createQueuedProduction({ id: contentId, title: 'Teste de acompanhamento', topic: 'Teste', script: 'Roteiro de teste', options: { targetMinutes: 2, sceneCount: 3 } });
+    await db.saveProductionJob({ id: jobId, stage: 'processing', progress: 5, message: 'Worker iniciou', result: { contentId, worker: { status: 'active', heartbeatAt: new Date().toISOString() } }, startedAt: new Date().toISOString(), updatedAt: new Date().toISOString() });
+    await db.recordProductionEvent({ jobId, contentId, level: 'info', stage: 'processing', progress: 5, message: 'Worker iniciou' });
+    const events = await db.getProductionEvents({ jobId, contentId });
+    const library = await db.getContentLibrary();
+    if (events.length !== 1 || events[0].message !== 'Worker iniciou') throw new Error('Production event was not persisted');
+    if (!library.some((item) => item.id === contentId && item.status === 'queued' && item.title === 'Teste de acompanhamento')) throw new Error('Queued production was not visible in the content library');
+    await db.executeQuery('DELETE FROM production_job_events WHERE job_id = ?', [jobId]);
+    await db.executeQuery('DELETE FROM production_jobs WHERE id = ?', [jobId]);
+    await db.executeQuery('DELETE FROM productions WHERE id = ?', [contentId]);
+    await db.close();
+    this.logger.info('Production observability test completed successfully');
+  }
+
+  async testValidatedCompletionGuard() {
+    const { ProductionQueue } = require('./utils/production-queue');
+    const previousRedis = process.env.REDIS_URL;
+    delete process.env.REDIS_URL;
+    try {
+      let resolveFinal;
+      const final = new Promise((resolve) => { resolveFinal = resolve; });
+      const queue = new ProductionQueue({
+        processJob: async () => ({ status: 'ready', storageKey: null, videoUrl: null }),
+        onProgress: (_id, stage, _progress, message) => { if (stage === 'failed') resolveFinal(message); },
+        logger: this.logger
+      });
+      await queue.add('job_invalid_completion', { productionId: 'prod_invalid_completion' });
+      const message = await Promise.race([final, new Promise((_, reject) => setTimeout(() => reject(new Error('Completion guard did not finish')), 2000))]);
+      if (!/MP4 validado/i.test(message)) throw new Error('Production without an R2 video was not rejected');
+    } finally {
+      if (previousRedis === undefined) delete process.env.REDIS_URL;
+      else process.env.REDIS_URL = previousRedis;
+    }
+    this.logger.info('Validated completion guard test completed successfully');
   }
 
   async testAPIValidationAndSecurity() {

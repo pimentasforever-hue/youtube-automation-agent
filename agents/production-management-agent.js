@@ -13,7 +13,7 @@ class ProductionManagementAgent {
     this.pipeline = [];
     this.assets = new Map();
     this.aiVideoGenerator = new AIVideoGenerator(credentials);
-    this.storage = new R2Storage();
+    this.storage = new R2Storage(this.logger);
   }
 
   async initialize() {
@@ -92,21 +92,27 @@ class ProductionManagementAgent {
       
       // Save to database
       await this.db.saveProductionData(productionData);
+
+      if (this.storage.enabled && productionData.assets.thumbnail?.path && await fs.access(productionData.assets.thumbnail.path).then(() => true).catch(() => false)) {
+        const uploadedThumbnail = await this.storage.upload(productionData.assets.thumbnail.path, `productions/${productionId}/thumbnail.png`, 'image/png');
+        productionData.assets.thumbnail = { ...productionData.assets.thumbnail, ...uploadedThumbnail };
+        onProgress('thumbnail-storage', 64, 'Miniatura enviada para o Cloudflare R2', { objectKey: uploadedThumbnail.key, asset: 'thumbnail' });
+      }
       
       // Generate video content
       onProgress('visuals', 66, 'Criando as cenas do vídeo');
-      await this.generateVideoContent(productionData);
+      await this.generateVideoContent(productionData, onProgress);
       
       // Generate audio narration
       if (options.narration !== false) {
         onProgress('narration', 75, 'Gerando a narração');
-        await this.generateAudioNarration(productionData);
+        await this.generateAudioNarration(productionData, onProgress);
       }
       
       // Generate captions
       if (options.captions !== false) {
         onProgress('captions', 82, 'Sincronizando as legendas');
-        await this.generateCaptions(productionData);
+        await this.generateCaptions(productionData, onProgress);
       }
       
       // Final assembly
@@ -119,7 +125,11 @@ class ProductionManagementAgent {
         throw new Error('A produção não gerou um vídeo válido. Os arquivos incompletos não foram enviados.');
       } else {
         onProgress('storage', 92, 'Enviando o vídeo para o Cloudflare');
-        await this.storage.uploadProductionAssets(productionData);
+        await this.storage.uploadProductionAssets(productionData, (upload) => {
+          if (upload.phase !== 'completed') return;
+          const progress = 92 + Math.round((upload.completed / Math.max(1, upload.total)) * 7);
+          onProgress('storage', progress, `${upload.filename} enviado para o Cloudflare R2`, { objectKey: upload.key, asset: upload.name, completed: upload.completed, total: upload.total });
+        });
         productionData.status = 'ready';
         productionData.timeline.readyForUpload = new Date().toISOString();
       }
@@ -307,7 +317,7 @@ class ProductionManagementAgent {
     return Math.min(100, priority);
   }
 
-  async generateVideoContent(productionData) {
+  async generateVideoContent(productionData, onProgress = () => {}) {
     this.logger.info('Generating AI video content...');
     
     try {
@@ -318,14 +328,25 @@ class ProductionManagementAgent {
       const basePrompts = this.createVisualPromptsFromScript(script);
       const visualPrompts = Array.from({ length: requestedScenes }, (_, index) => `${basePrompts[index % basePrompts.length]}, cena ${index + 1} de ${requestedScenes}, composição visual distinta`);
       const visualAssets = [];
+      const uploadedVisuals = [];
       
-      for (const prompt of visualPrompts) {
+      for (let index = 0; index < visualPrompts.length; index += 1) {
+        const prompt = visualPrompts[index];
         const assets = await this.aiVideoGenerator.generateVisualAssets(prompt, 'ethereal', 1);
         visualAssets.push(...assets);
+        let uploaded = null;
+        if (this.storage.enabled && assets[0]) {
+          uploaded = await this.storage.upload(assets[0], `productions/${productionData.id}/scenes/scene-${String(index + 1).padStart(4, '0')}.png`, 'image/png');
+          uploadedVisuals.push(uploaded);
+        }
+        const completed = index + 1;
+        const progress = 66 + Math.floor((completed / requestedScenes) * 8);
+        onProgress('visuals', progress, `Cena ${completed} de ${requestedScenes} criada${uploaded ? ' e enviada para o R2' : ''}`, { asset: 'scene', completed, total: requestedScenes, objectKey: uploaded?.key || null });
       }
       
       productionData.assets.video = {
         visualAssets: visualAssets,
+        uploadedVisuals,
         duration: productionData.estimatedDuration,
         format: 'mp4',
         resolution: '1920x1080',
@@ -338,8 +359,7 @@ class ProductionManagementAgent {
       return visualAssets;
     } catch (error) {
       this.logger.error('AI video content generation failed:', error);
-      // Fallback to placeholder
-      return await this.createVideoElements(productionData);
+      throw error;
     }
   }
 
@@ -431,7 +451,7 @@ class ProductionManagementAgent {
     return elements;
   }
 
-  async generateAudioNarration(productionData) {
+  async generateAudioNarration(productionData, onProgress = () => {}) {
     this.logger.info('Generating AI audio narration...');
     
     try {
@@ -442,7 +462,10 @@ class ProductionManagementAgent {
       const ttsText = await fs.readFile(productionData.assets.script.ttsPath, 'utf8');
       
       // Generate audio using AI TTS
-      await this.aiVideoGenerator.generateTTSAudio(ttsText, audioPath);
+      await this.aiVideoGenerator.generateTTSAudio(ttsText, audioPath, ({ completed, total }) => {
+        const progress = 75 + Math.floor((completed / Math.max(1, total)) * 6);
+        onProgress('narration', progress, `Narração ${completed} de ${total} processada`, { asset: 'audio', completed, total });
+      });
       
       productionData.assets.audio = {
         path: audioPath,
@@ -453,6 +476,12 @@ class ProductionManagementAgent {
       };
       
       productionData.timeline.audioGenerated = new Date().toISOString();
+
+      if (this.storage.enabled) {
+        const uploaded = await this.storage.upload(audioPath, `productions/${productionData.id}/narration.mp3`, 'audio/mpeg');
+        productionData.assets.audio = { ...productionData.assets.audio, ...uploaded };
+        onProgress('narration-storage', 81, 'Narração enviada para o Cloudflare R2', { asset: 'audio', objectKey: uploaded.key });
+      }
       
       return audioPath;
     } catch (error) {
@@ -461,7 +490,7 @@ class ProductionManagementAgent {
     }
   }
 
-  async generateCaptions(productionData) {
+  async generateCaptions(productionData, onProgress = () => {}) {
     this.logger.info('Generating captions...');
     
     const captionsPath = path.join(__dirname, '..', 'data', 'captions', `${productionData.id}_captions.srt`);
@@ -480,6 +509,12 @@ class ProductionManagementAgent {
     };
     
     productionData.timeline.captionsGenerated = new Date().toISOString();
+
+    if (this.storage.enabled) {
+      const uploaded = await this.storage.upload(captionsPath, `productions/${productionData.id}/captions.srt`, 'application/x-subrip');
+      productionData.assets.captions = { ...productionData.assets.captions, ...uploaded };
+      onProgress('captions-storage', 84, 'Legendas enviadas para o Cloudflare R2', { asset: 'captions', objectKey: uploaded.key });
+    }
     
     return captionsPath;
   }
@@ -579,7 +614,7 @@ class ProductionManagementAgent {
       // Use AI Video Generator to create the final video
       const producedPath = await this.aiVideoGenerator.generateVideo(
         productionData.script,
-        productionData.assets.video.visualAssets || [],
+        productionData.assets.video?.visualAssets || [],
         productionData.assets.audio.path,
         finalVideoPath
       );

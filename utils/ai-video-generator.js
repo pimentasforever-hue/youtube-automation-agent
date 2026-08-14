@@ -51,23 +51,27 @@ class AIVideoGenerator {
     this.azureSpeechRegion = credentials.azure?.speechRegion || process.env.AZURE_SPEECH_REGION;
   }
 
-  async generateTTSAudio(text, outputPath) {
+  async generateTTSAudio(text, outputPath, onProgress = () => {}) {
     this.logger.info('Generating TTS audio...');
     
     try {
       // Try ElevenLabs first (higher quality)
       if (this.elevenLabsApiKey && this.elevenLabsVoiceId) {
-        return await this.generateElevenLabsTTS(text, outputPath);
+        const result = await this.generateElevenLabsTTS(text, outputPath);
+        onProgress({ completed: 1, total: 1 });
+        return result;
       }
       
       // Fallback to OpenAI TTS
       if (this.openai) {
-        return await this.generateOpenAITTS(text, outputPath);
+        const result = await this.generateOpenAITTS(text, outputPath);
+        onProgress({ completed: 1, total: 1 });
+        return result;
       }
 
       // Fallback to Gemini native TTS (free tier)
       if (this.gemini) {
-        return await this.generateGeminiTTS(text, outputPath);
+        return await this.generateGeminiTTS(text, outputPath, onProgress);
       }
 
       throw new Error('Nenhum provedor de narração está configurado.');
@@ -130,10 +134,12 @@ class AIVideoGenerator {
     return outputPath;
   }
 
-  async generateGeminiTTS(text, outputPath) {
+  async generateGeminiTTS(text, outputPath, onProgress = () => {}) {
     const chunks = this.splitTextForTTS(text);
-    if (chunks.length > 1) return await this.generateGeminiTTSChunks(chunks, outputPath);
-    return await this.generateGeminiTTSChunk(text, outputPath);
+    if (chunks.length > 1) return await this.generateGeminiTTSChunks(chunks, outputPath, onProgress);
+    const result = await this.generateGeminiTTSChunk(text, outputPath);
+    onProgress({ completed: 1, total: 1 });
+    return result;
   }
 
   splitTextForTTS(text, maxCharacters = 3000) {
@@ -153,7 +159,7 @@ class AIVideoGenerator {
     return chunks.length ? chunks : [''];
   }
 
-  async generateGeminiTTSChunks(chunks, outputPath) {
+  async generateGeminiTTSChunks(chunks, outputPath, onProgress = () => {}) {
     const partPaths = [];
     const listPath = `${outputPath}.concat.txt`;
     try {
@@ -161,6 +167,7 @@ class AIVideoGenerator {
         const partPath = `${outputPath}.part-${String(index).padStart(3, '0')}.mp3`;
         await this.generateGeminiTTSChunk(chunks[index], partPath);
         partPaths.push(partPath);
+        onProgress({ completed: index + 1, total: chunks.length });
       }
       await fs.writeFile(listPath, partPaths.map(part => `file '${part}'`).join('\n'));
       await runFFmpeg(['-y', '-f', 'concat', '-safe', '0', '-i', listPath, '-c', 'copy', outputPath]);

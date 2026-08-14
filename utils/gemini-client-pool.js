@@ -2,13 +2,14 @@ class GeminiClientPool {
   constructor(keys = [], logger = null) {
     this.logger = logger;
     this.cursor = 0;
+    this.timeoutMs = Math.max(15000, Number(process.env.GEMINI_REQUEST_TIMEOUT_MS) || 120000);
     const uniqueKeys = [...new Set(keys.filter(Boolean).map((key) => String(key).trim()).filter(Boolean))];
     if (!uniqueKeys.length) {
       this.clients = [];
       return;
     }
     const { GoogleGenAI } = require('@google/genai');
-    this.clients = uniqueKeys.map((apiKey) => new GoogleGenAI({ apiKey }));
+    this.clients = uniqueKeys.map((apiKey) => new GoogleGenAI({ apiKey, httpOptions: { timeout: this.timeoutMs } }));
   }
 
   get available() {
@@ -26,7 +27,8 @@ class GeminiClientPool {
         return result;
       } catch (error) {
         lastError = error;
-        this.logger?.warn(`Gemini key ${index + 1} unavailable. Trying the next configured key.`);
+        const timedOut = /timed out|timeout|aborted/i.test(String(error?.message || ''));
+        this.logger?.warn(`Gemini key ${index + 1} ${timedOut ? `did not respond within ${Math.round(this.timeoutMs / 1000)} seconds` : 'is unavailable'}. Trying the next configured key.`);
       }
     }
     throw lastError;

@@ -200,6 +200,19 @@ class Database {
         started_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
       )`,
+      `CREATE TABLE IF NOT EXISTS production_job_events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        job_id TEXT NOT NULL,
+        content_id TEXT,
+        level TEXT NOT NULL DEFAULT 'info',
+        stage TEXT NOT NULL,
+        progress INTEGER NOT NULL DEFAULT 0,
+        message TEXT NOT NULL,
+        details TEXT,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+      )`,
+      `CREATE INDEX IF NOT EXISTS idx_production_job_events_job ON production_job_events(job_id, id)`,
+      `CREATE INDEX IF NOT EXISTS idx_production_job_events_content ON production_job_events(content_id, id)`,
       `CREATE TABLE IF NOT EXISTS users (
         id TEXT PRIMARY KEY,
         username TEXT NOT NULL UNIQUE,
@@ -354,6 +367,25 @@ class Database {
   }
 
   // Production methods
+  async createQueuedProduction({ id, title, topic, script, options = {} }) {
+    const production = {
+      id,
+      status: 'queued',
+      assets: {
+        title: sanitizeText(title || 'Nova produção'),
+        topic: sanitizeText(topic || 'Roteiro enviado pelo usuário'),
+        sourceScript: typeof script === 'string' ? script : '',
+        settings: options
+      },
+      timeline: { queuedAt: new Date().toISOString() },
+      scheduledPublishTime: null,
+      priority: 50,
+      estimatedDuration: String(options.targetMinutes || 8)
+    };
+    await this.saveProductionData(production);
+    return production;
+  }
+
   async saveProductionData(production) {
     const insertVerb = this.isPostgres ? 'INSERT INTO' : 'INSERT OR REPLACE INTO';
     const conflictClause = this.isPostgres
@@ -453,8 +485,8 @@ class Database {
 
       return {
         id: row.id,
-        title: sanitizeText(title),
-        topic: sanitizeText(row.topic),
+        title: sanitizeText(title === 'Conteúdo sem título' ? assets.title || title : title),
+        topic: sanitizeText(row.topic === 'Tema não informado' ? assets.topic || row.topic : row.topic),
         status: row.status,
         duration: row.estimated_duration,
         scheduledFor: row.scheduled_publish_time,
@@ -494,7 +526,7 @@ class Database {
     return {
       id: row.id,
       status: row.status,
-      script: row.full_script || parts.map(flatten).filter(Boolean).join('\n\n'),
+      script: row.full_script || assets.sourceScript || parts.map(flatten).filter(Boolean).join('\n\n'),
       targetMinutes: Math.max(1, parseInt(row.estimated_duration, 10) || 8),
       sceneCount: Math.max(1, assets.video?.visualAssets?.length || 8)
     };
@@ -747,6 +779,36 @@ class Database {
     }));
   }
 
+  async recordProductionEvent(event) {
+    await this.executeQuery(
+      `INSERT INTO production_job_events (job_id, content_id, level, stage, progress, message, details, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [event.jobId, event.contentId || null, event.level || 'info', event.stage, Number(event.progress) || 0, event.message, event.details ? JSON.stringify(event.details) : null, event.createdAt || new Date().toISOString()]
+    );
+  }
+
+  async getProductionEvents({ jobId = null, contentId = null, limit = 200 } = {}) {
+    let rows = [];
+    if (jobId && contentId) {
+      rows = await this.getAllRows('SELECT * FROM production_job_events WHERE job_id = ? OR content_id = ? ORDER BY id DESC LIMIT ?', [jobId, contentId, limit]);
+    } else if (jobId) {
+      rows = await this.getAllRows('SELECT * FROM production_job_events WHERE job_id = ? ORDER BY id DESC LIMIT ?', [jobId, limit]);
+    } else if (contentId) {
+      rows = await this.getAllRows('SELECT * FROM production_job_events WHERE content_id = ? ORDER BY id DESC LIMIT ?', [contentId, limit]);
+    }
+    return rows.reverse().map((row) => ({
+      id: Number(row.id),
+      jobId: row.job_id,
+      contentId: row.content_id,
+      level: row.level,
+      stage: row.stage,
+      progress: Number(row.progress),
+      message: row.message,
+      details: row.details ? JSON.parse(row.details) : null,
+      createdAt: row.created_at
+    }));
+  }
+
   async recoverInterruptedProductions() {
     const interrupted = await this.getAllRows("SELECT id, created_at FROM productions WHERE status = 'processing'");
     for (const production of interrupted) {
@@ -775,6 +837,24 @@ class Database {
       );
     }
     return interrupted.length;
+  }
+
+  async reconcileInvalidCompletedJobs() {
+    const completed = await this.getAllRows("SELECT id, result FROM production_jobs WHERE stage = 'completed'");
+    let corrected = 0;
+    for (const row of completed) {
+      let result = null;
+      try { result = row.result ? JSON.parse(row.result) : null; } catch { result = null; }
+      const valid = ['ready', 'published'].includes(result?.status) && Boolean(result?.storageKey && result?.videoUrl);
+      if (valid) continue;
+      await this.executeQuery(
+        "UPDATE production_jobs SET stage = 'failed', progress = 100, message = ?, updated_at = ? WHERE id = ?",
+        ['O registro antigo não possui um vídeo validado no Cloudflare R2.', new Date().toISOString(), row.id]
+      );
+      if (result?.contentId) await this.setProductionStatus(result.contentId, 'failed');
+      corrected += 1;
+    }
+    return corrected;
   }
 
   postgresQuery(query) {

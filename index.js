@@ -48,6 +48,8 @@ class YouTubeAutomationAgent {
       if (interruptedCount) this.logger.warn(`${interruptedCount} interrupted production(s) recovered from the previous process`);
       const interruptedJobCount = process.env.REDIS_URL ? 0 : await this.db.recoverInterruptedProductionJobs();
       if (interruptedJobCount) this.logger.warn(`${interruptedJobCount} interrupted production job(s) closed after restart`);
+      const invalidCompletedCount = await this.db.reconcileInvalidCompletedJobs();
+      if (invalidCompletedCount) this.logger.warn(`${invalidCompletedCount} production job(s) marked as failed because no validated R2 video exists`);
       
       // Load credentials
       this.logger.info('Loading credentials...');
@@ -67,9 +69,11 @@ class YouTubeAutomationAgent {
       this.productionQueue = new ProductionQueue({
         processJob: (options, jobId) => this.generateContent(options.topic, options.style, options.length, options, jobId),
         onProgress: (jobId, stage, progress, message, result) => this.updateProductionJob(jobId, stage, progress, message, result),
+        onHeartbeat: (jobId, worker) => this.updateProductionHeartbeat(jobId, worker),
         logger: this.logger
       });
       await this.productionQueue.initialize();
+      await this.reconcileProductionQueue();
 
       // Show which pipeline stages will run for real vs. be simulated
       await this.logCapabilitySummary();
@@ -470,19 +474,32 @@ class YouTubeAutomationAgent {
 
     // Manual content generation
     this.app.post('/generate', this.requireAuth(), async (req, res) => {
+      let jobId = null;
+      let contentId = null;
       try {
         const validation = this.validateGenerateRequestBody(req.body);
         if (!validation.valid) {
           return res.status(validation.status).json({ success: false, error: validation.error });
         }
 
-        const jobId = `job_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
-        const options = validation.value;
-        this.updateProductionJob(jobId, 'queued', 3, 'Produção adicionada à fila');
+        jobId = `job_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
+        contentId = `prod_${jobId}`;
+        const options = { ...validation.value, productionId: contentId };
+        const title = options.script?.split(/\r?\n/).map((line) => line.trim()).find(Boolean)?.slice(0, 100) || options.topic || 'Nova produção';
+        await this.db.createQueuedProduction({ id: contentId, title, topic: options.topic, script: options.script, options });
+        this.updateProductionJob(jobId, 'queued', 1, 'Produção registrada. Aguardando confirmação do worker.', { contentId, productionId: contentId });
+        if (this.agents.production.storage.enabled) {
+          await this.agents.production.storage.writeManifest(contentId, { jobId, stage: 'queued', progress: 1, status: 'queued', message: 'Produção registrada no servidor' });
+        }
         const queued = await this.productionQueue.add(jobId, options);
-        res.status(202).json({ success: true, jobId, queue: queued.mode });
+        this.updateProductionJob(jobId, 'queued', 3, queued.mode === 'redis' ? 'Redis aceitou a produção. Aguardando o worker.' : 'Fila local aceitou a produção.', { contentId, productionId: contentId, queueMode: queued.mode });
+        res.status(202).json({ success: true, jobId, contentId, contentUrl: `/conteudos/${encodeURIComponent(contentId)}`, queue: queued.mode });
       } catch (error) {
-        res.status(500).json({ success: false, error: error.message });
+        if (jobId && contentId) {
+          this.updateProductionJob(jobId, 'failed', 100, `A produção não entrou na fila: ${error.message}`, { contentId, productionId: contentId });
+          await this.db.setProductionStatus(contentId, 'failed').catch(() => {});
+        }
+        res.status(500).json({ success: false, contentId, error: error.message });
       }
     });
 
@@ -570,7 +587,8 @@ class YouTubeAutomationAgent {
         for (const job of this.productionJobs.values()) merged.set(job.id, job);
         const jobs = Array.from(merged.values())
           .sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt))
-          .slice(0, 20);
+          .slice(0, 20)
+          .map((job) => this.decorateProductionJob(job));
         res.json(jobs);
       } catch (error) {
         res.status(500).json({ error: error.message });
@@ -583,7 +601,7 @@ class YouTubeAutomationAgent {
       res.setHeader('Connection', 'keep-alive');
       res.flushHeaders?.();
       this.productionClients.add(res);
-      const jobs = await this.db.getProductionJobs(20).catch(() => []);
+      const jobs = (await this.db.getProductionJobs(20).catch(() => [])).map((job) => this.decorateProductionJob(job));
       res.write(`event: snapshot\ndata: ${JSON.stringify(jobs)}\n\n`);
       const heartbeat = setInterval(() => res.write(': conectado\n\n'), 20000);
       req.on('close', () => {
@@ -632,6 +650,47 @@ class YouTubeAutomationAgent {
       }
     });
 
+    this.app.get('/contents/:contentId/production', this.requireAuth(), async (req, res) => {
+      try {
+        res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+        const contentId = req.params.contentId;
+        const jobs = await this.db.getProductionJobs(100);
+        const matching = jobs.filter((job) => {
+          const tracked = job.result || {};
+          return tracked.contentId === contentId || tracked.productionId === contentId || tracked.retryOf === contentId || `prod_${job.id}` === contentId;
+        });
+        const job = matching.sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt))[0] || null;
+        const events = await this.db.getProductionEvents({ jobId: job?.id || null, contentId, limit: 200 });
+        if (!events.length) {
+          const contents = await this.db.getContentLibrary();
+          const content = contents.find((item) => item.id === contentId);
+          if (content?.timeline?.failureMessage) {
+            events.push({
+              id: 0,
+              jobId: job?.id || null,
+              contentId,
+              level: 'error',
+              stage: 'failed',
+              progress: 100,
+              message: this.safeOperationalMessage(content.timeline.failureMessage),
+              details: { source: 'production_timeline' },
+              createdAt: content.timeline.failedAt || job?.updatedAt || content.createdAt
+            });
+          }
+        }
+        const storage = await this.agents.production.storage.describeProduction(contentId);
+        return res.json({
+          contentId,
+          serverTime: new Date().toISOString(),
+          job: job ? this.decorateProductionJob(job) : null,
+          events,
+          storage
+        });
+      } catch (error) {
+        return res.status(500).json({ error: error.message });
+      }
+    });
+
     this.app.post('/contents/:contentId/retry', this.requireAuth(), async (req, res) => {
       try {
         const content = await this.db.getContentRetryData(req.params.contentId);
@@ -648,12 +707,17 @@ class YouTubeAutomationAgent {
           narration: true,
           captions: true,
           autoPublish: false,
-          retryOf: content.id
+          retryOf: content.id,
+          productionId: content.id
         };
-        this.updateProductionJob(jobId, 'queued', 3, 'Nova tentativa adicionada à fila', { retryOf: content.id });
+        this.updateProductionJob(jobId, 'queued', 1, 'Nova tentativa registrada. Aguardando confirmação do worker.', { contentId: content.id, productionId: content.id, retryOf: content.id });
         await this.db.setProductionStatus(content.id, 'processing');
+        if (this.agents.production.storage.enabled) {
+          await this.agents.production.storage.writeManifest(content.id, { jobId, stage: 'queued', progress: 1, status: 'processing', retry: true, message: 'Nova tentativa registrada no servidor' });
+        }
         const queued = await this.productionQueue.add(jobId, options);
-        return res.status(202).json({ success: true, jobId, queue: queued.mode });
+        this.updateProductionJob(jobId, 'queued', 3, queued.mode === 'redis' ? 'Redis aceitou a nova tentativa. Aguardando o worker.' : 'Fila local aceitou a nova tentativa.', { contentId: content.id, productionId: content.id, retryOf: content.id, queueMode: queued.mode });
+        return res.status(202).json({ success: true, jobId, contentId: content.id, contentUrl: `/conteudos/${encodeURIComponent(content.id)}`, queue: queued.mode });
       } catch (error) {
         return res.status(500).json({ success: false, error: error.message });
       }
@@ -690,10 +754,11 @@ class YouTubeAutomationAgent {
     });
 
     this.app.get('/connections', this.requireAuth(), async (_req, res) => {
+      const storageStatus = await this.agents.production.storage.describeProduction(null);
       const result = {
         youtube: { connected: false, authorized: Boolean(this.credentials.tokens?.youtube) },
         ai: { connected: this.credentials.hasAITextProvider(), provider: process.env.GEMINI_API_KEY ? 'Gemini' : process.env.OPENAI_API_KEY ? 'OpenAI' : null },
-        storage: { connected: Boolean(process.env.R2_ACCOUNT_ID && process.env.R2_ACCESS_KEY_ID && process.env.R2_SECRET_ACCESS_KEY && process.env.R2_BUCKET), provider: process.env.R2_BUCKET ? 'Cloudflare R2' : 'Railway Volume', bucket: process.env.R2_BUCKET || null },
+        storage: storageStatus,
         database: { connected: true, provider: this.db.isPostgres ? 'PostgreSQL' : 'SQLite', managedBy: this.db.isPostgres ? 'Railway' : 'Aplicação' },
         queue: this.productionQueue?.status() || { connected: false, provider: 'Fila local' }
       };
@@ -754,16 +819,98 @@ class YouTubeAutomationAgent {
     });
   }
 
-  updateProductionJob(id, stage, progress, message, result = null) {
-    const existing = this.productionJobs.get(id) || { id, startedAt: new Date().toISOString() };
-    const job = { ...existing, stage, progress, message, result: result ?? existing.result ?? null, updatedAt: new Date().toISOString() };
+  safeOperationalMessage(message) {
+    return String(message || '')
+      .replace(/AIza[0-9A-Za-z_-]{20,}/g, '[chave removida]')
+      .replace(/sk-[0-9A-Za-z_-]{16,}/g, '[chave removida]')
+      .slice(0, 1200);
+  }
+
+  async reconcileProductionQueue() {
+    if (!this.productionQueue?.enabled) return;
+    const jobs = await this.db.getProductionJobs(100);
+    const pending = jobs.filter((job) => !['completed', 'failed'].includes(job.stage));
+    for (const job of pending) {
+      const state = await this.productionQueue.inspect(job.id).catch(() => null);
+      if (!state) continue;
+      if (state.state === 'failed') {
+        this.updateProductionJob(job.id, 'failed', 100, `O Redis confirmou a falha: ${state.failedReason || 'motivo não informado'}`, job.result, { level: 'error', details: { redisState: state.state, attempt: state.attemptsMade } });
+      } else if (state.state === 'completed') {
+        const valid = ['ready', 'published'].includes(state.result?.status) && Boolean(state.result?.storageKey && state.result?.videoUrl);
+        this.updateProductionJob(job.id, valid ? 'completed' : 'failed', 100, valid ? 'Redis e R2 confirmaram a conclusão' : 'O Redis terminou o trabalho, mas não existe um MP4 validado no R2.', { ...(job.result || {}), ...(state.result || {}) }, { level: valid ? 'info' : 'error', details: { redisState: state.state, attempt: state.attemptsMade } });
+      } else if (state.state === 'missing') {
+        this.updateProductionJob(job.id, 'failed', 100, 'O trabalho não existe mais no Redis e não pode continuar.', job.result, { level: 'error', details: { redisState: state.state } });
+      }
+    }
+  }
+
+  decorateProductionJob(job) {
+    const worker = job?.result?.worker || null;
+    const heartbeatAt = worker?.heartbeatAt || null;
+    const heartbeatAgeMs = heartbeatAt ? Math.max(0, Date.now() - new Date(heartbeatAt).getTime()) : null;
+    let operational = 'unconfirmed';
+    if (job?.stage === 'completed') operational = 'completed';
+    else if (job?.stage === 'failed') operational = 'failed';
+    else if (job?.stage === 'retrying') operational = 'retrying';
+    else if (worker?.status === 'active' && heartbeatAgeMs !== null && heartbeatAgeMs <= 45000) operational = 'working';
+    else if (job?.stage === 'queued') operational = 'queued';
+    else if (heartbeatAgeMs !== null && heartbeatAgeMs > 45000) operational = 'unresponsive';
+    return { ...job, operational, heartbeatAt, heartbeatAgeMs };
+  }
+
+  broadcastProductionJob(job) {
+    const event = `event: production\ndata: ${JSON.stringify(this.decorateProductionJob(job))}\n\n`;
+    for (const client of this.productionClients) client.write(event);
+  }
+
+  updateProductionHeartbeat(id, worker) {
+    const existing = this.productionJobs.get(id);
+    if (!existing) return;
+    const result = { ...(existing.result || {}), worker: { ...(existing.result?.worker || {}), ...worker } };
+    const job = { ...existing, result, updatedAt: new Date().toISOString() };
+    this.productionJobs.set(id, job);
+    this.db.saveProductionJob(job).catch((error) => this.logger.warn(`Could not persist heartbeat for ${id}: ${error.message}`));
+    this.broadcastProductionJob(job);
+  }
+
+  updateProductionJob(id, stage, progress, message, result = null, metadata = {}) {
+    const existing = this.productionJobs.get(id) || { id, startedAt: new Date().toISOString(), result: null };
+    const safeMessage = this.safeOperationalMessage(message);
+    const mergedResult = result ? { ...(existing.result || {}), ...result } : existing.result;
+    const job = { ...existing, stage, progress: Math.max(0, Math.min(100, Number(progress) || 0)), message: safeMessage, result: mergedResult || null, updatedAt: new Date().toISOString() };
+    const changed = existing.stage !== job.stage || existing.progress !== job.progress || existing.message !== job.message;
     this.productionJobs.set(id, job);
     this.db.saveProductionJob(job).catch((error) => this.logger.warn(`Could not persist production job ${id}: ${error.message}`));
-    if (result?.retryOf && ['completed', 'failed'].includes(stage)) {
-      this.db.setProductionStatus(result.retryOf, stage === 'completed' ? 'replaced' : 'simulated').catch(() => {});
+    const contentId = job.result?.contentId || job.result?.productionId || job.result?.retryOf || null;
+    if (contentId && stage === 'failed') this.db.setProductionStatus(contentId, 'failed').catch(() => {});
+    else if (contentId && stage === 'completed') this.db.setProductionStatus(contentId, 'ready').catch(() => {});
+    else if (contentId && !['queued', 'retrying'].includes(stage)) this.db.setProductionStatus(contentId, 'processing').catch(() => {});
+
+    if (changed) {
+      const level = metadata.level || (stage === 'failed' ? 'error' : stage === 'retrying' ? 'warning' : 'info');
+      const details = metadata.details || {
+        queueMode: job.result?.queueMode || null,
+        workerId: job.result?.worker?.id || null,
+        attempt: job.result?.worker?.attempt || null
+      };
+      this.db.recordProductionEvent({ jobId: id, contentId, level, stage, progress: job.progress, message: safeMessage, details, createdAt: job.updatedAt })
+        .catch((error) => this.logger.warn(`Could not persist production event ${id}: ${error.message}`));
+      this.logger.info(`[${id}] ${safeMessage}`);
+      if (contentId && this.agents.production?.storage?.enabled) {
+        this.agents.production.storage.writeManifest(contentId, {
+          jobId: id,
+          stage,
+          progress: job.progress,
+          status: this.decorateProductionJob(job).operational,
+          message: safeMessage,
+          worker: job.result?.worker ? { status: job.result.worker.status, attempt: job.result.worker.attempt, heartbeatAt: job.result.worker.heartbeatAt } : null
+        }).catch((error) => {
+          this.logger.warn(`Could not update R2 manifest for ${contentId}: ${error.message}`);
+          this.db.recordProductionEvent({ jobId: id, contentId, level: 'warning', stage: 'storage', progress: job.progress, message: `Falha ao atualizar o estado no R2: ${this.safeOperationalMessage(error.message)}`, createdAt: new Date().toISOString() }).catch(() => {});
+        });
+      }
     }
-    const event = `event: production\ndata: ${JSON.stringify(job)}\n\n`;
-    for (const client of this.productionClients) client.write(event);
+    this.broadcastProductionJob(job);
   }
 
   async generateContent(topic = null, style = null, length = 'medium', options = {}, jobId = null) {
@@ -795,14 +942,14 @@ class YouTubeAutomationAgent {
     // Step 5: Production Management
     if (jobId) this.updateProductionJob(jobId, 'production', 65, 'Gerando áudio, cenas e legendas');
     const productionData = await this.agents.production.processContent({
-      productionId: jobId ? `prod_${jobId}` : null,
+      productionId: options.productionId || (jobId ? `prod_${jobId}` : null),
       strategy,
       script,
       thumbnail,
       seo: seoData,
       options,
-      onProgress: (stage, progress, message) => {
-        if (jobId) this.updateProductionJob(jobId, stage, progress, message);
+      onProgress: (stage, progress, message, details) => {
+        if (jobId) this.updateProductionJob(jobId, stage, progress, message, null, { details });
       }
     });
     productionData.settings = options;
@@ -820,9 +967,11 @@ class YouTubeAutomationAgent {
     }
 
     return {
-      contentId,
+      contentId: productionData.id || contentId,
       title: script.title,
       status: productionData.status,
+      storageKey: productionData.assets.finalVideo?.key || null,
+      videoUrl: productionData.assets.finalVideo?.url || null,
       scheduledFor: scheduleEntry ? scheduleEntry.publishTime : null,
       retryOf: options.retryOf || null
     };
