@@ -123,7 +123,8 @@ function renderContents() {
   $('content-library').innerHTML = filtered.length ? filtered.map((item) => {
     const statusText = statusLabels[item.status] || item.status || 'Em produção';
     const youtubeLink = item.youtubeUrl ? `<a class="external-link" href="${text(item.youtubeUrl)}" target="_blank" rel="noopener noreferrer" aria-label="Abrir ${text(item.title)} no YouTube"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 4h6v6M20 4l-9 9"/><path d="M18 13v6a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h6"/></svg></a>` : '';
-    return `<article class="library-card" data-content-id="${text(item.id)}" tabindex="0" role="button" aria-label="Abrir ${text(item.title)}"><span class="content-thumb" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m9 8 7 4-7 4z"/><rect x="3" y="4" width="18" height="16" rx="3"/></svg></span><div class="content-main"><strong title="${text(item.title)}">${text(item.title)}</strong><div class="library-meta"><span>${text(item.topic)}</span><span>${text(item.duration || 'Duração não informada')}</span><span>${text(formatDate(item.createdAt))}</span></div></div><div class="library-actions"><span class="status-badge status-${text(item.status)}">${text(statusText)}</span>${youtubeLink}<button class="content-action" type="button" data-action="edit" aria-label="Editar ${text(item.title)}">Editar</button><button class="content-action danger" type="button" data-action="delete" aria-label="Apagar ${text(item.title)}">Apagar</button></div></article>`;
+    const retryButton = ['failed', 'simulated'].includes(item.status) ? `<button class="content-action" type="button" data-action="retry" aria-label="Tentar novamente ${text(item.title)}">Tentar novamente</button>` : '';
+    return `<article class="library-card" data-content-id="${text(item.id)}" tabindex="0" role="button" aria-label="Abrir ${text(item.title)}"><span class="content-thumb" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m9 8 7 4-7 4z"/><rect x="3" y="4" width="18" height="16" rx="3"/></svg></span><div class="content-main"><strong title="${text(item.title)}">${text(item.title)}</strong><div class="library-meta"><span>${text(item.topic)}</span><span>${text(item.duration || 'Duração não informada')}</span><span>${text(formatDate(item.createdAt))}</span></div></div><div class="library-actions"><span class="status-badge status-${text(item.status)}">${text(statusText)}</span>${youtubeLink}${retryButton}<button class="content-action" type="button" data-action="edit" aria-label="Editar ${text(item.title)}">Editar</button><button class="content-action danger" type="button" data-action="delete" aria-label="Apagar ${text(item.title)}">Apagar</button></div></article>`;
   }).join('') : emptyState(Boolean(query || status !== 'all'));
   const emptyCreate = $('content-library').querySelector('[data-empty-create]');
   if (emptyCreate) emptyCreate.addEventListener('click', () => showView('create'));
@@ -133,6 +134,7 @@ function renderContents() {
       const action = event.target.closest('[data-action]')?.dataset.action;
       if (action === 'edit') return beginContentEdit(card.dataset.contentId);
       if (action === 'delete') return confirmContentDelete(card.dataset.contentId);
+      if (action === 'retry') return retryContent(card.dataset.contentId, event.target.closest('[data-action]'));
       openContent(card.dataset.contentId);
     };
     card.addEventListener('click', open);
@@ -149,8 +151,35 @@ function openContent(id) {
   $('detail-meta').textContent = `${item.topic} · ${item.duration || 'Duração não informada'} · ${formatDate(item.createdAt)}`;
   $('video-frame').innerHTML = item.videoUrl ? `<video controls playsinline preload="metadata" src="${text(item.videoUrl)}"${item.thumbnailUrl ? ` poster="${text(item.thumbnailUrl)}"` : ''}></video>` : '<div class="video-empty"><strong>Vídeo ainda indisponível</strong><p>Quando a montagem terminar, o player aparecerá aqui.</p></div>';
   $('edit-content-form').hidden = true;
+  $('retry-content-button').hidden = !['failed', 'simulated'].includes(item.status);
+  $('retry-content-message').textContent = '';
   showView('detail');
   window.history.replaceState(null, '', `/conteudos/${encodeURIComponent(id)}`);
+}
+
+async function retryContent(id = selectedContentId, sourceButton = null) {
+  const button = sourceButton || $('retry-content-button');
+  const message = $('retry-content-message');
+  button.disabled = true;
+  const originalText = button.textContent;
+  button.textContent = 'Adicionando à fila';
+  message.className = 'form-message';
+  message.textContent = 'Preparando uma nova tentativa com o roteiro salvo.';
+  try {
+    const response = await request(`/contents/${encodeURIComponent(id)}/retry`, { method: 'POST' });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || 'Não foi possível tentar novamente.');
+    message.className = 'form-message success';
+    message.textContent = 'Nova tentativa iniciada. Acompanhe o progresso na visão geral.';
+    await loadDashboard();
+    showView('overview');
+  } catch (error) {
+    message.className = 'form-message error';
+    message.textContent = error.message;
+  } finally {
+    button.disabled = false;
+    button.textContent = originalText;
+  }
 }
 
 function beginContentEdit(id = selectedContentId) {
@@ -265,6 +294,7 @@ $('status-filter').addEventListener('change', renderContents);
 $('refresh-button').addEventListener('click', loadDashboard);
 $('logout-button').addEventListener('click', async () => { await fetch('/api/auth/logout', { method: 'POST' }); window.location.assign('/login'); });
 $('edit-content-button').addEventListener('click', () => beginContentEdit());
+$('retry-content-button').addEventListener('click', () => retryContent());
 $('delete-content-button').addEventListener('click', () => confirmContentDelete());
 $('cancel-content-edit').addEventListener('click', () => { $('edit-content-form').hidden = true; });
 $('edit-content-form').addEventListener('submit', async (event) => {

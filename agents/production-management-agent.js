@@ -48,6 +48,7 @@ class ProductionManagementAgent {
   }
 
   async processContent(contentData) {
+    let productionData;
     try {
       this.logger.info('Processing content for production...');
       
@@ -56,7 +57,7 @@ class ProductionManagementAgent {
       // Create production entry
       const productionId = contentData.productionId || this.generateProductionId();
       
-      const productionData = {
+      productionData = {
         id: productionId,
         strategy,
         script,
@@ -128,6 +129,12 @@ class ProductionManagementAgent {
       this.logger.info(`Content processing complete: ${productionId} (status: ${productionData.status})`);
       return productionData;
     } catch (error) {
+      if (productionData?.id) {
+        productionData.status = 'failed';
+        productionData.timeline.failedAt = new Date().toISOString();
+        productionData.timeline.failureMessage = error.message;
+        await this.db.updateProductionData(productionData).catch(() => {});
+      }
       this.logger.error('Failed to process content:', error);
       throw error;
     }

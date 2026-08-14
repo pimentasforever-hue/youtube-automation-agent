@@ -465,6 +465,36 @@ class Database {
     }));
   }
 
+  async getContentRetryData(contentId) {
+    const row = await this.getRow(
+      `SELECT p.id, p.status, p.estimated_duration, p.assets, s.full_script, s.hook,
+        s.introduction, s.main_content, s.conclusion, s.call_to_action
+       FROM productions p
+       LEFT JOIN scripts s ON s.id = p.script_id
+       WHERE p.id = ?`,
+      [contentId]
+    );
+    if (!row) return null;
+    const parse = (value) => {
+      try { return JSON.parse(value || 'null'); } catch { return null; }
+    };
+    const parts = [parse(row.hook), parse(row.introduction), parse(row.main_content), parse(row.conclusion), parse(row.call_to_action)];
+    const flatten = (value) => {
+      if (!value) return '';
+      if (typeof value === 'string') return value;
+      if (Array.isArray(value)) return value.map(flatten).filter(Boolean).join('\n\n');
+      return Object.values(value).map(flatten).filter(Boolean).join('\n\n');
+    };
+    const assets = parse(row.assets) || {};
+    return {
+      id: row.id,
+      status: row.status,
+      script: row.full_script || parts.map(flatten).filter(Boolean).join('\n\n'),
+      targetMinutes: Math.max(1, parseInt(row.estimated_duration, 10) || 8),
+      sceneCount: Math.max(1, assets.video?.visualAssets?.length || 8)
+    };
+  }
+
   async updateContentMetadata(contentId, title, topic) {
     const production = await this.getRow('SELECT script_id, strategy_id FROM productions WHERE id = ?', [contentId]);
     if (!production) return false;

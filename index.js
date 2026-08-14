@@ -607,6 +607,32 @@ class YouTubeAutomationAgent {
       }
     });
 
+    this.app.post('/contents/:contentId/retry', this.requireAuth(), async (req, res) => {
+      try {
+        const content = await this.db.getContentRetryData(req.params.contentId);
+        if (!content) return res.status(404).json({ success: false, error: 'Conteúdo não encontrado.' });
+        if (!['failed', 'simulated'].includes(content.status)) return res.status(409).json({ success: false, error: 'Este conteúdo não precisa de uma nova tentativa.' });
+        if (!content.script.trim()) return res.status(422).json({ success: false, error: 'O roteiro original não está disponível para uma nova tentativa.' });
+        const jobId = `job_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
+        const options = {
+          script: content.script,
+          targetMinutes: content.targetMinutes,
+          sceneCount: content.sceneCount,
+          style: 'ethereal',
+          privacy: 'private',
+          narration: true,
+          captions: true,
+          autoPublish: false,
+          retryOf: content.id
+        };
+        this.updateProductionJob(jobId, 'queued', 3, 'Nova tentativa adicionada à fila');
+        const queued = await this.productionQueue.add(jobId, options);
+        return res.status(202).json({ success: true, jobId, queue: queued.mode });
+      } catch (error) {
+        return res.status(500).json({ success: false, error: error.message });
+      }
+    });
+
     this.app.patch('/contents/:contentId', this.requireAuth(), async (req, res) => {
       try {
         const title = typeof req.body?.title === 'string' ? req.body.title.trim() : '';
