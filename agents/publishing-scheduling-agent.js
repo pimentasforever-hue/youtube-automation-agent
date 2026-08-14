@@ -168,7 +168,7 @@ class PublishingSchedulingAgent {
 
       return fsSync.createReadStream(videoPath);
     } catch (error) {
-      throw new Error('video file not found — refusing to upload placeholder');
+      throw new Error('video file not found , refusing to upload placeholder');
     }
   }
   async uploadThumbnail(videoId, thumbnailPath) {
@@ -224,7 +224,7 @@ class PublishingSchedulingAgent {
       if (scheduled.length > 0) {
         this.logger.info(`Publish queue: ${scheduled.length} item(s) waiting, next publish at ${scheduled[0].publishTime}`);
       } else {
-        this.logger.info('Publish queue is empty — nothing scheduled yet.');
+        this.logger.info('Publish queue is empty , nothing scheduled yet.');
       }
       return 0;
     }

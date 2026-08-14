@@ -71,7 +71,7 @@ class AITextService {
       return this._initGemini(geminiKey, credentials.gemini?.model);
     }
 
-    this.logger.warn('No AI text provider configured — text generation unavailable');
+    this.logger.warn('No AI text provider configured , text generation unavailable');
   }
 
   _initOpenAICompatible(preset, apiKey, model) {

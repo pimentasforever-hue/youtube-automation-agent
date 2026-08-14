@@ -297,10 +297,44 @@ $('confirm-delete-content').addEventListener('click', async (event) => {
 
 const SCRIPT_LIMIT = 5500000;
 function updateScriptCounter() {
-  $('script-counter').textContent = `${$('script-input').value.length.toLocaleString('pt-BR')} / ${SCRIPT_LIMIT.toLocaleString('pt-BR')}`;
+  const script = $('script-input').value;
+  const words = script.trim() ? script.trim().split(/\s+/).length : 0;
+  const estimatedMinutes = words ? Math.max(1, Math.round(words / 140)) : 0;
+  const targetMinutes = Math.max(1, Number($('target-minutes').value) || estimatedMinutes || 1);
+  const scenes = Math.max(1, Number($('scene-count').value) || 1);
+  $('script-counter').textContent = `${script.length.toLocaleString('pt-BR')} / ${SCRIPT_LIMIT.toLocaleString('pt-BR')}`;
+  $('script-word-count').textContent = words.toLocaleString('pt-BR');
+  $('script-duration').textContent = `${estimatedMinutes} min`;
+  $('visual-rhythm').textContent = `${Math.round((targetMinutes * 60) / scenes)} s`;
 }
 $('script-input').addEventListener('input', updateScriptCounter);
+$('target-minutes').addEventListener('input', updateScriptCounter);
+$('scene-count').addEventListener('input', updateScriptCounter);
 updateScriptCounter();
+$('suggest-scenes-button').addEventListener('click', async () => {
+  const button = $('suggest-scenes-button');
+  const explanation = $('scene-suggestion');
+  button.disabled = true;
+  button.textContent = 'Analisando';
+  explanation.textContent = 'Analisando duração, formato e ritmo do conteúdo.';
+  try {
+    const response = await request('/api/suggest-scenes', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ script: $('script-input').value.trim(), targetMinutes: Number($('target-minutes').value), style: $('style').value })
+    });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || 'Não foi possível sugerir a quantidade de cenas.');
+    $('scene-count').value = result.sceneCount;
+    explanation.textContent = result.reason;
+    updateScriptCounter();
+  } catch (error) {
+    explanation.textContent = error.message;
+  } finally {
+    button.disabled = false;
+    button.textContent = 'Sugerir com IA';
+  }
+});
 $('close-script-review').addEventListener('click', () => { $('script-review').hidden = true; });
 $('review-script-button').addEventListener('click', async () => {
   const button = $('review-script-button');

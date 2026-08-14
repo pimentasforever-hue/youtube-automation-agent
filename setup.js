@@ -26,8 +26,8 @@ class YouTubeAutomationSetup {
       name: 'mode',
       message: 'How would you like to set up?',
       choices: [
-        { name: '🧭 Guided walkthrough — explains everything, tests keys as you go (recommended for first-timers)', value: 'walkthrough' },
-        { name: '⚡ Classic quick setup — for users who already have all their keys', value: 'classic' }
+        { name: '🧭 Guided walkthrough , explains everything, tests keys as you go (recommended for first-timers)', value: 'walkthrough' },
+        { name: '⚡ Classic quick setup , for users who already have all their keys', value: 'classic' }
       ]
     }]);
 
@@ -285,7 +285,7 @@ node index.js`;
       console.log(color(`  ${icon} ${component}`));
     });
 
-    // Only broken infrastructure is fatal — missing credentials/FFmpeg can be fixed later
+    // Only broken infrastructure is fatal , missing credentials/FFmpeg can be fixed later
     if (!validation.directories || !validation.database || !validation.environment) {
       throw new Error('Setup validation failed. Please check the errors above.');
     }

@@ -13,7 +13,7 @@ const { checkFFmpeg, ffmpegInstallHint } = require('./utils/ffmpeg');
 // Everything a beginner needs to know about each provider, in one place
 const AI_PROVIDER_GUIDE = {
   gemini: {
-    label: 'Google Gemini — FREE tier, no credit card (recommended for beginners)',
+    label: 'Google Gemini , FREE tier, no credit card (recommended for beginners)',
     keyUrl: 'https://aistudio.google.com/apikey',
     keyHint: 'starts with "AIza"',
     instructions: [
@@ -30,13 +30,13 @@ const AI_PROVIDER_GUIDE = {
     validationCreds: (apiKey, model) => ({ gemini: { apiKey, model } })
   },
   openai: {
-    label: 'OpenAI — paid (~$0.05–0.20/video), premium image + voice quality',
+    label: 'OpenAI , paid (~$0.05-0.20/video), premium image + voice quality',
     keyUrl: 'https://platform.openai.com/api-keys',
     keyHint: 'starts with "sk-"',
     instructions: [
       'Sign in (or create an account) and add billing',
       'Click "Create new secret key"',
-      'Copy the key — it is shown only once'
+      'Copy the key , it is shown only once'
     ],
     models: ['gpt-5.5', 'gpt-5.5-pro', 'gpt-5.4'],
     defaultModel: 'gpt-5.5',
@@ -47,7 +47,7 @@ const AI_PROVIDER_GUIDE = {
     validationCreds: (apiKey, model) => ({ aiProvider: { provider: 'openai', apiKey, model } })
   },
   openrouter: {
-    label: 'OpenRouter — one key, 300+ models (pay per use)',
+    label: 'OpenRouter , one key, 300+ models (pay per use)',
     keyUrl: 'https://openrouter.ai/keys',
     keyHint: 'starts with "sk-or-"',
     instructions: [
@@ -63,7 +63,7 @@ const AI_PROVIDER_GUIDE = {
     validationCreds: (apiKey, model) => ({ aiProvider: { provider: 'openrouter', apiKey, model } })
   },
   kimi: {
-    label: 'Kimi (Moonshot AI) — very cheap, strong quality',
+    label: 'Kimi (Moonshot AI) , very cheap, strong quality',
     keyUrl: 'https://platform.kimi.ai',
     keyHint: 'from the Moonshot platform console',
     instructions: ['Create an account', 'Open the API keys page and create a key'],
@@ -76,7 +76,7 @@ const AI_PROVIDER_GUIDE = {
     validationCreds: (apiKey, model) => ({ aiProvider: { provider: 'kimi', apiKey, model } })
   },
   mimo: {
-    label: 'MiMo (Xiaomi) — competitive pricing',
+    label: 'MiMo (Xiaomi) , competitive pricing',
     keyUrl: 'https://mimo.mi.com',
     keyHint: 'from the MiMo console',
     instructions: ['Create an account', 'Create an API key in the console'],
@@ -89,7 +89,7 @@ const AI_PROVIDER_GUIDE = {
     validationCreds: (apiKey, model) => ({ aiProvider: { provider: 'mimo', apiKey, model } })
   },
   glm: {
-    label: 'GLM (Zhipu AI) — ~$1/M input tokens',
+    label: 'GLM (Zhipu AI) , ~$1/M input tokens',
     keyUrl: 'https://z.ai',
     keyHint: 'from the Z.ai console',
     instructions: ['Create an account', 'Create an API key in the console'],
@@ -121,15 +121,15 @@ class SetupWalkthrough {
     };
     const command = commands[process.platform];
     if (command) {
-      exec(command, () => {}); // best effort — the URL is printed either way
+      exec(command, () => {}); // best effort , the URL is printed either way
     }
   }
 
   async run() {
-    console.log(chalk.cyan.bold('\n🧭 YouTube Automation Agent — Guided Walkthrough'));
+    console.log(chalk.cyan.bold('\n🧭 YouTube Automation Agent , Guided Walkthrough'));
     console.log(chalk.gray('═'.repeat(60)));
-    console.log(chalk.white('This takes about 10–15 minutes and explains everything as you go.'));
-    console.log(chalk.white('Every step can be skipped and finished later — your progress is'));
+    console.log(chalk.white('This takes about 10-15 minutes and explains everything as you go.'));
+    console.log(chalk.white('Every step can be skipped and finished later , your progress is'));
     console.log(chalk.white('saved after each step. Re-run any time with: ') + chalk.cyan('npm run walkthrough'));
 
     await this.cm.loadCredentials();
@@ -143,7 +143,7 @@ class SetupWalkthrough {
       await this.stepFinish();
     } catch (error) {
       if (error && (error.isTtyError || /User force closed/i.test(error.message || ''))) {
-        console.log(chalk.yellow('\n\n👋 No problem — everything you completed is saved.'));
+        console.log(chalk.yellow('\n\n👋 No problem , everything you completed is saved.'));
         console.log(chalk.cyan('Pick up where you left off with: npm run walkthrough'));
         return;
       }
@@ -158,12 +158,12 @@ class SetupWalkthrough {
     const nodeMajor = parseInt(process.versions.node.split('.')[0], 10);
     console.log(nodeMajor >= 18
       ? chalk.green(`  ✓ Node.js ${process.versions.node}`)
-      : chalk.red(`  ✗ Node.js ${process.versions.node} — version 18+ is required (https://nodejs.org)`));
+      : chalk.red(`  ✗ Node.js ${process.versions.node} , version 18+ is required (https://nodejs.org)`));
 
     const ffmpegOk = await checkFFmpeg();
     console.log(ffmpegOk
       ? chalk.green('  ✓ FFmpeg (video assembly)')
-      : chalk.yellow(`  ✗ FFmpeg — ${ffmpegInstallHint()}`));
+      : chalk.yellow(`  ✗ FFmpeg , ${ffmpegInstallHint()}`));
 
     const directories = [
       'config', 'logs', 'data', 'data/production', 'data/assets', 'data/videos',
@@ -185,7 +185,7 @@ class SetupWalkthrough {
       console.log(chalk.green('  ✓ .env file'));
     } catch (error) {
       await fs.writeFile(path.join(__dirname, '.env'), [
-        '# Created by the guided walkthrough — see .env.example for every option',
+        '# Created by the guided walkthrough , see .env.example for every option',
         'NODE_ENV=production',
         'PORT=3456',
         'LOG_LEVEL=info',
@@ -210,7 +210,7 @@ class SetupWalkthrough {
       if (!redo) return;
     } else {
       console.log(chalk.white('The agent needs one AI service. If you don\'t want to spend money,'));
-      console.log(chalk.white('pick Google Gemini — its free tier covers the whole pipeline:'));
+      console.log(chalk.white('pick Google Gemini , its free tier covers the whole pipeline:'));
       console.log(chalk.white('scripts, images, and voice narration.'));
     }
 
@@ -238,7 +238,7 @@ class SetupWalkthrough {
       }]);
 
       if (!apiKey.trim()) {
-        console.log(chalk.yellow('  Skipped — configure later with: npm run walkthrough'));
+        console.log(chalk.yellow('  Skipped , configure later with: npm run walkthrough'));
         return;
       }
 
@@ -267,7 +267,7 @@ class SetupWalkthrough {
         default: true
       }]);
       if (!retry) {
-        console.log(chalk.yellow('  Skipped — configure later with: npm run walkthrough'));
+        console.log(chalk.yellow('  Skipped , configure later with: npm run walkthrough'));
         return;
       }
     }
@@ -314,7 +314,7 @@ class SetupWalkthrough {
       if (!redo) return;
     } else {
       console.log(chalk.white('This lets the agent upload to your channel. It\'s the fiddliest step,'));
-      console.log(chalk.white('but it\'s free and you only do it once. You can also skip it — videos'));
+      console.log(chalk.white('but it\'s free and you only do it once. You can also skip it , videos'));
       console.log(chalk.white('will still be generated locally in data/videos/.'));
     }
 
@@ -330,13 +330,13 @@ class SetupWalkthrough {
     }]);
 
     if (action === 'skip') {
-      console.log(chalk.yellow('  Skipped — connect later with: npm run walkthrough'));
+      console.log(chalk.yellow('  Skipped , connect later with: npm run walkthrough'));
       return;
     }
 
     if (action === 'guided') {
       console.log(chalk.cyan('\nDo this in the browser tab that just opened:'));
-      console.log(chalk.white('  1. Create a project (any name) — top bar → "New project"'));
+      console.log(chalk.white('  1. Create a project (any name) , top bar → "New project"'));
       console.log(chalk.white('  2. Menu → "APIs & Services" → "Library" → search "YouTube Data API v3" → Enable'));
       console.log(chalk.white('  3. "APIs & Services" → "OAuth consent screen" → External → fill the 3 required'));
       console.log(chalk.white('     fields → add YOUR OWN email under "Test users"'));
@@ -363,7 +363,7 @@ class SetupWalkthrough {
     ]);
 
     if (!answers.clientId.trim()) {
-      console.log(chalk.yellow('  Skipped — connect later with: npm run walkthrough'));
+      console.log(chalk.yellow('  Skipped , connect later with: npm run walkthrough'));
       return;
     }
 
@@ -374,8 +374,8 @@ class SetupWalkthrough {
     };
     await this.cm.saveCredentials();
 
-    console.log(chalk.cyan('\nNow let\'s sign in. A Google page will open — approve the access.'));
-    console.log(chalk.gray('(You may see "Google hasn\'t verified this app" — click "Continue".'));
+    console.log(chalk.cyan('\nNow let\'s sign in. A Google page will open , approve the access.'));
+    console.log(chalk.gray('(You may see "Google hasn\'t verified this app" , click "Continue".'));
     console.log(chalk.gray(' That\'s expected: the "app" is your own Cloud project.)'));
 
     try {
@@ -387,7 +387,7 @@ class SetupWalkthrough {
       await auth.testAuthentication();
     } catch (error) {
       console.log(chalk.red(`  ✗ Sign-in failed: ${error.message}`));
-      console.log(chalk.yellow('  Your Client ID/Secret are saved — retry with: npm run walkthrough'));
+      console.log(chalk.yellow('  Your Client ID/Secret are saved , retry with: npm run walkthrough'));
     }
   }
 
@@ -439,13 +439,13 @@ class SetupWalkthrough {
     };
     await this.cm.saveCredentials();
 
-    console.log(chalk.green('  ✓ Saved.') + chalk.gray(' Uploads default to PRIVATE so you can review them first —'));
+    console.log(chalk.green('  ✓ Saved.') + chalk.gray(' Uploads default to PRIVATE so you can review them first ,'));
     console.log(chalk.gray('  set DEFAULT_PRIVACY_STATUS=public in .env when you\'re confident.'));
   }
 
   // ── Step 5: summary ────────────────────────────────────────────────────
   async stepFinish() {
-    this.header(5, 'All set — here\'s what your pipeline can do');
+    this.header(5, 'All set , here\'s what your pipeline can do');
 
     await this.cm.loadCredentials();
     await this.cm.loadTokens();
@@ -459,7 +459,7 @@ class SetupWalkthrough {
 
     const rows = [
       { ok: hasText, name: 'Write scripts & pick topics', fix: 'step 2 (AI provider)' },
-      { ok: hasMedia, name: 'Generate images & voice narration', fix: 'step 2 — use a Gemini or OpenAI key' },
+      { ok: hasMedia, name: 'Generate images & voice narration', fix: 'step 2 , use a Gemini or OpenAI key' },
       { ok: hasFFmpeg, name: 'Assemble real .mp4 videos', fix: ffmpegInstallHint() },
       { ok: hasUpload, name: 'Upload to YouTube', fix: 'step 3 (YouTube connection)' }
     ];
@@ -467,13 +467,13 @@ class SetupWalkthrough {
     for (const row of rows) {
       console.log(row.ok
         ? chalk.green(`  ✓ ${row.name}`)
-        : chalk.yellow(`  ✗ ${row.name} — re-run the walkthrough: ${row.fix}`));
+        : chalk.yellow(`  ✗ ${row.name} , re-run the walkthrough: ${row.fix}`));
     }
 
     console.log(chalk.cyan.bold('\n🚀 Next steps:'));
     console.log(chalk.white('  1. npm start'));
     console.log(chalk.white('  2. Open http://localhost:3456 and press "Generate Content"'));
-    console.log(chalk.white('     (or wait — it generates automatically every day at 6 AM)'));
+    console.log(chalk.white('     (or wait , it generates automatically every day at 6 AM)'));
     console.log(chalk.white('  3. Finished videos land in data/videos/ and upload as PRIVATE'));
     console.log(chalk.gray('\nChanged your mind about anything? Just run: npm run walkthrough'));
   }
@@ -482,7 +482,7 @@ class SetupWalkthrough {
 if (require.main === module) {
   new SetupWalkthrough().run().catch(error => {
     console.error(chalk.red('\nWalkthrough failed:'), error.message);
-    console.log(chalk.yellow('Your progress so far is saved — re-run: npm run walkthrough'));
+    console.log(chalk.yellow('Your progress so far is saved , re-run: npm run walkthrough'));
     process.exit(1);
   });
 }

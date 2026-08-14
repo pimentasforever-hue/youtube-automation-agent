@@ -52,7 +52,7 @@ function ffmpegInstallHint() {
   };
 
   const platformHint = hints[process.platform] || 'https://ffmpeg.org/download.html';
-  return `FFmpeg not found. Install it with: ${platformHint} — or run "npm install" again to fetch the bundled ffmpeg-static binary, or set FFMPEG_PATH to your ffmpeg executable.`;
+  return `FFmpeg not found. Install it with: ${platformHint} , or run "npm install" again to fetch the bundled ffmpeg-static binary, or set FFMPEG_PATH to your ffmpeg executable.`;
 }
 
 module.exports = { getFFmpegPath, checkFFmpeg, runFFmpeg, ffmpegInstallHint };

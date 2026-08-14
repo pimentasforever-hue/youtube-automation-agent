@@ -473,7 +473,7 @@ class SystemTest {
     const os = require('os');
 
     if (!(await checkFFmpeg())) {
-      this.logger.warn('FFmpeg unavailable — skipping slideshow renderer test');
+      this.logger.warn('FFmpeg unavailable , skipping slideshow renderer test');
       return;
     }
 
@@ -662,7 +662,7 @@ class SystemTest {
     const hardcodedBanner = indexSource.match(/YouTube Automation Agent v[\d.]/);
     if (hardcodedBanner) {
       throw new Error(
-        `Startup banner hardcodes a version ("${hardcodedBanner[0]}") — interpolate package.json's version instead`
+        `Startup banner hardcodes a version ("${hardcodedBanner[0]}") , interpolate package.json's version instead`
       );
     }
     if (!indexSource.includes('YouTube Automation Agent v${version}')) {

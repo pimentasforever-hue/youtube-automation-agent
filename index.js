@@ -115,8 +115,8 @@ class YouTubeAutomationAgent {
 
     const capabilities = [
       { name: 'Script & strategy generation', ok: hasText, hint: 'configure an AI provider (npm run credentials:setup)' },
-      { name: 'Image generation (visuals/thumbnails)', ok: hasImages, hint: 'requires an OpenAI or Gemini API key — otherwise gradient slides are used' },
-      { name: 'Voice narration (TTS)', ok: hasTTS, hint: 'configure OpenAI, Gemini, ElevenLabs, or Azure Speech — otherwise videos are silent' },
+      { name: 'Image generation (visuals/thumbnails)', ok: hasImages, hint: 'requires an OpenAI or Gemini API key , otherwise gradient slides are used' },
+      { name: 'Voice narration (TTS)', ok: hasTTS, hint: 'configure OpenAI, Gemini, ElevenLabs, or Azure Speech , otherwise videos are silent' },
       { name: 'Video assembly (FFmpeg)', ok: hasFFmpeg, hint: ffmpegInstallHint() },
       { name: 'YouTube upload', ok: hasUpload, hint: 'run: npm run credentials:setup' }
     ];
@@ -126,7 +126,7 @@ class YouTubeAutomationAgent {
       if (cap.ok) {
         console.log(chalk.green(`  ✓ ${cap.name}`));
       } else {
-        console.log(chalk.yellow(`  ✗ ${cap.name} — ${cap.hint}`));
+        console.log(chalk.yellow(`  ✗ ${cap.name} , ${cap.hint}`));
       }
     }
 
@@ -490,6 +490,34 @@ class YouTubeAutomationAgent {
           : `${script.slice(0, 40000)}\n\n[MEIO DO ROTEIRO]\n${script.slice(Math.floor(script.length / 2) - 20000, Math.floor(script.length / 2) + 20000)}\n\n[FINAL DO ROTEIRO]\n${script.slice(-40000)}`;
         const report = await reviewer.generateText(`Você é um editor profissional de roteiros bíblicos para YouTube. Revise o texto abaixo em português do Brasil. Analise fidelidade e coerência bíblica, clareza, estrutura narrativa, ritmo para narração, repetições, linguagem, retenção e possíveis afirmações que precisam de verificação. Não reescreva o roteiro inteiro. Entregue um relatório prático com: Resumo, Pontos fortes, Correções prioritárias e Sugestões de melhoria. Informe claramente quando a análise tiver sido feita por amostragem.\n\nTamanho total: ${script.length} caracteres.\n\nROTEIRO:\n${sample}`, { maxTokens: 2400, temperature: 0.3 });
         return res.json({ success: true, report, sampled: script.length > 120000, reviewedCharacters: sample.length, totalCharacters: script.length });
+      } catch (error) {
+        return res.status(500).json({ success: false, error: error.message });
+      }
+    });
+
+    this.app.post('/api/suggest-scenes', this.requireAuth(), async (req, res) => {
+      try {
+        const script = typeof req.body?.script === 'string' ? req.body.script.trim() : '';
+        const targetMinutes = Math.min(30, Math.max(1, Number(req.body?.targetMinutes) || 8));
+        const style = ['story', 'educational', 'explainer', 'list'].includes(req.body?.style) ? req.body.style : 'story';
+        if (script.length > 5500000) return res.status(413).json({ success: false, error: 'O roteiro ultrapassa o limite de 5.500.000 caracteres.' });
+        const paceByStyle = { story: 1.7, educational: 1.35, explainer: 1.5, list: 1.8 };
+        const fallbackCount = Math.min(24, Math.max(3, Math.round(targetMinutes * paceByStyle[style])));
+        const reviewer = this.agents.scriptWriter.aiTextService;
+        if (!reviewer?.isAvailable()) {
+          const seconds = Math.round((targetMinutes * 60) / fallbackCount);
+          return res.json({ success: true, sceneCount: fallbackCount, reason: `Recomendação calculada: ${fallbackCount} cenas, com uma mudança visual a cada ${seconds} segundos.` });
+        }
+        const sample = script.length > 12000 ? `${script.slice(0, 6000)}\n\n[FINAL]\n${script.slice(-6000)}` : script;
+        const answer = await reviewer.generateText(`Você é um diretor de vídeos para YouTube. Recomende uma quantidade de cenas entre 3 e 24 para um vídeo de ${targetMinutes} minutos no formato ${style}. O objetivo é manter ritmo visual, clareza e retenção sem criar cortes excessivos. Quantidade calculada como referência: ${fallbackCount}. Considere o roteiro quando ele estiver disponível. Responda somente em JSON válido com as chaves sceneCount, que deve ser um número inteiro, e reason, com uma explicação curta em português do Brasil. Não use travessão.\n\nROTEIRO:\n${sample || 'Roteiro ainda não informado.'}`, { maxTokens: 300, temperature: 0.2 });
+        const jsonText = String(answer).match(/\{[\s\S]*\}/)?.[0];
+        const parsed = jsonText ? JSON.parse(jsonText) : {};
+        const sceneCount = Math.min(24, Math.max(3, Math.round(Number(parsed.sceneCount) || fallbackCount)));
+        const seconds = Math.round((targetMinutes * 60) / sceneCount);
+        const reason = typeof parsed.reason === 'string' && parsed.reason.trim()
+          ? parsed.reason.trim().replace(/[\u2013\u2014]/g, ',')
+          : `Recomendo ${sceneCount} cenas, com uma mudança visual a cada ${seconds} segundos.`;
+        return res.json({ success: true, sceneCount, reason });
       } catch (error) {
         return res.status(500).json({ success: false, error: error.message });
       }

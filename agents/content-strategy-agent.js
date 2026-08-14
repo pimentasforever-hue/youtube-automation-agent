@@ -354,7 +354,7 @@ Avoid fabricated claims and unsupported numbers.`;
       .sort((a, b) => b.finalScore - a.finalScore);
 
     // Single keywords scraped from trending titles ("crown", "official") make
-    // meaningless video topics — only use a trend that reads like a real subject.
+    // meaningless video topics , only use a trend that reads like a real subject.
     const readable = scoredTopics.find(t => t.topic.trim().includes(' ') && t.topic.trim().length >= 8);
     if (readable) {
       return readable;
@@ -362,7 +362,7 @@ Avoid fabricated claims and unsupported numbers.`;
 
     const fallbackTopics = this.getEvergreenFallbackTopics();
     const pick = fallbackTopics[Math.floor(Math.random() * fallbackTopics.length)];
-    this.logger.info(`Template mode: no readable trending topic available — using evergreen topic "${pick}"`);
+    this.logger.info(`Template mode: no readable trending topic available , using evergreen topic "${pick}"`);
     return { topic: pick, score: 1 };
   }
 

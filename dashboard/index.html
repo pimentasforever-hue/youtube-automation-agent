@@ -90,13 +90,14 @@
           <form id="generate-form">
             <div class="script-label-row"><div><label for="script-input">Roteiro</label><p>Escreva ou cole o texto completo que será usado na produção.</p></div><span id="script-counter" aria-live="polite">0 / 5.500.000</span></div>
             <textarea id="script-input" name="script" class="script-editor" rows="16" maxlength="5500000" placeholder="Cole seu roteiro aqui. Você pode começar com o título e organizar o texto em parágrafos."></textarea>
+            <div class="script-metrics" aria-live="polite"><span><strong id="script-word-count">0</strong> palavras</span><span><strong id="script-duration">0 min</strong> de narração estimada</span><span><strong id="visual-rhythm">60 s</strong> por cena</span></div>
             <div class="script-actions"><button class="secondary-button" id="review-script-button" type="button"><span>Revisar com IA</span></button><small>A IA analisa coerência, clareza, ritmo, repetições e pontos que precisam de verificação.</small></div>
             <section id="script-review" class="script-review" aria-live="polite" hidden><div class="script-review-heading"><div><p class="eyebrow">Revisão por IA</p><h3>Relatório editorial</h3></div><button class="text-button" id="close-script-review" type="button">Fechar</button></div><div id="script-review-content"></div></section>
             <div class="form-row">
               <div><label for="style">Formato</label><select id="style" name="style"><option value="story">História narrada</option><option value="educational">Estudo bíblico</option><option value="explainer">Explicação</option><option value="list">Lista temática</option></select></div>
               <div><label for="target-minutes">Duração aproximada em minutos</label><input id="target-minutes" name="targetMinutes" type="number" min="1" max="30" value="8" required></div>
             </div>
-            <div class="form-row"><div><label for="scene-count">Quantidade de cenas</label><input id="scene-count" type="number" min="3" max="24" value="8" required></div><div><label for="privacy">Visibilidade no YouTube</label><select id="privacy"><option value="private">Privado</option><option value="unlisted">Não listado</option><option value="public">Público</option></select></div></div>
+            <div class="form-row"><div><label for="scene-count">Quantidade de cenas</label><div class="field-with-action"><input id="scene-count" type="number" min="3" max="24" value="8" required><button class="secondary-button compact" id="suggest-scenes-button" type="button">Sugerir com IA</button></div><small id="scene-suggestion" class="field-explanation" aria-live="polite">A IA considera a duração, o formato e o roteiro para manter um bom ritmo visual.</small></div><div><label for="privacy">Visibilidade no YouTube</label><select id="privacy"><option value="private">Privado</option><option value="unlisted">Não listado</option><option value="public">Público</option></select></div></div>
             <div class="option-grid"><label><input id="narration" type="checkbox" checked> Gerar narração</label><label><input id="captions" type="checkbox" checked> Gerar legendas</label><label><input id="auto-publish" type="checkbox"> Publicar automaticamente</label></div>
             <div class="creation-summary"><span>O fluxo inclui roteiro, narração, imagens, montagem e preparação para publicação.</span></div>
             <div id="form-message" class="form-message" role="status" aria-live="polite"></div>
@@ -116,6 +117,6 @@
     </main>
   </div>
   <dialog id="delete-content-dialog" class="confirm-dialog"><form method="dialog"><p class="eyebrow">Ação permanente</p><h2>Apagar este conteúdo?</h2><p id="delete-content-description">O vídeo e seus arquivos serão removidos do sistema. Se já estiver publicado no YouTube, a publicação não será apagada do canal.</p><div id="delete-content-message" class="form-message" role="status"></div><div class="form-actions"><button class="secondary-button" value="cancel">Cancelar</button><button class="danger-button" id="confirm-delete-content" value="confirm">Apagar conteúdo</button></div></form></dialog>
-  <script src="/app.js?v=20260814-script-editor" defer></script>
+  <script src="/app.js?v=20260814-creator-pro" defer></script>
 </body>
 </html>

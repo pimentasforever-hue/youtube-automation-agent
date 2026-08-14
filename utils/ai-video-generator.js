@@ -29,7 +29,7 @@ class AIVideoGenerator {
       this.logger.warn('Replicate API key not found - advanced video generation unavailable');
     }
 
-    // Gemini media generation (images + native TTS) — free-tier alternative to OpenAI
+    // Gemini media generation (images + native TTS) , free-tier alternative to OpenAI
     const geminiKey = credentials.gemini?.apiKey || process.env.GEMINI_API_KEY;
     if (geminiKey) {
       try {
@@ -331,7 +331,7 @@ class AIVideoGenerator {
       await page.addStyleTag({ content: '* { transition: none !important; animation: none !important; }' });
       await page.waitForTimeout(1000); // Wait for assets to load
 
-      // Capture ONE still per slide instead of screenshotting at 30fps —
+      // Capture ONE still per slide instead of screenshotting at 30fps ,
       // FFmpeg turns the stills into a crossfaded video in seconds.
       const slideCount = await page.evaluate(() => document.querySelectorAll('.slide').length);
       await fs.mkdir(slidesDir, { recursive: true });
@@ -649,7 +649,7 @@ class AIVideoGenerator {
     const hasRealAudio = await this.isUsableAudioFile(audioPath);
 
     if (!hasRealAudio) {
-      this.logger.warn('No narration audio available — producing silent video. Configure OpenAI, ElevenLabs, or Azure Speech for narration.');
+      this.logger.warn('No narration audio available , producing silent video. Configure OpenAI, ElevenLabs, or Azure Speech for narration.');
       if (videoPath !== outputPath) {
         await fs.copyFile(videoPath, outputPath);
       }

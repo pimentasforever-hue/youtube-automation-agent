@@ -130,7 +130,7 @@ class DailyAutomation {
       if (scheduleEntry) {
         this.logger.info('Content scheduled for publishing');
       } else {
-        this.logger.warn('Content was NOT scheduled — production produced placeholder assets. See warnings above.');
+        this.logger.warn('Content was NOT scheduled , production produced placeholder assets. See warnings above.');
       }
 
       timer.end();

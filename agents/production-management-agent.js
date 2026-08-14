@@ -114,11 +114,11 @@ class ProductionManagementAgent {
       onProgress('storage', 92, 'Enviando o vídeo para o Cloudflare');
       await this.storage.uploadProductionAssets(productionData);
 
-      // Mark as ready — or simulated, when no real video could be produced
+      // Mark as ready , or simulated, when no real video could be produced
       const simulated = Boolean(productionData.assets.finalVideo?.simulated);
       if (simulated) {
         productionData.status = 'simulated';
-        this.logger.warn(`Content ${productionId} produced PLACEHOLDER assets only — it will NOT be uploaded. Check your AI provider keys and FFmpeg installation.`);
+        this.logger.warn(`Content ${productionId} produced PLACEHOLDER assets only , it will NOT be uploaded. Check your AI provider keys and FFmpeg installation.`);
       } else {
         productionData.status = 'ready';
         productionData.timeline.readyForUpload = new Date().toISOString();

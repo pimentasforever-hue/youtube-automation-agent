@@ -578,7 +578,7 @@ class CredentialManager {
 
     if (missing.length > 0) {
       console.log(chalk.yellow(`\n⚠️  Missing credentials for: ${missing.join(', ')}`));
-      console.log(chalk.gray('Any one AI provider is enough — run: npm run credentials:setup'));
+      console.log(chalk.gray('Any one AI provider is enough , run: npm run credentials:setup'));
       return false;
     }
 
@@ -665,11 +665,11 @@ class CredentialManager {
         message: 'Select your preferred AI service:',
         choices: [
           { name: 'OpenAI (GPT-5.5)', value: 'openai' },
-          { name: 'Google Gemini (Gemini 3.5 — free tier)', value: 'gemini' },
+          { name: 'Google Gemini (Gemini 3.5 , free tier)', value: 'gemini' },
           { name: 'OpenRouter (300+ models, one API key)', value: 'openrouter' },
-          { name: 'Kimi (Moonshot AI — K2.6)', value: 'kimi' },
-          { name: 'MiMo (Xiaomi — V2.5 Pro)', value: 'mimo' },
-          { name: 'GLM (Zhipu AI — GLM-5)', value: 'glm' },
+          { name: 'Kimi (Moonshot AI , K2.6)', value: 'kimi' },
+          { name: 'MiMo (Xiaomi , V2.5 Pro)', value: 'mimo' },
+          { name: 'GLM (Zhipu AI , GLM-5)', value: 'glm' },
         ]
       }
     ]);
