@@ -2,6 +2,9 @@ const fs = require('fs');
 const path = require('path');
 const { S3Client, PutObjectCommand, ListObjectsV2Command, DeleteObjectsCommand } = require('@aws-sdk/client-s3');
 
+const IMAGE_EXTENSIONS = { 'image/png': '.png', 'image/jpeg': '.jpg', 'image/webp': '.webp' };
+const IMAGE_LABELS = { 'image/png': 'PNG', 'image/jpeg': 'JPEG', 'image/webp': 'WEBP' };
+
 class R2Storage {
   constructor(logger = null) {
     this.logger = logger;
@@ -19,16 +22,48 @@ class R2Storage {
 
   async upload(filePath, key, contentType) {
     if (!this.enabled || !filePath) return null;
-    await this.validateUploadFile(filePath, contentType);
+    const target = await this.resolveImageTarget(filePath, key, contentType);
+    await this.validateUploadFile(filePath, target.contentType);
     const response = await this.client.send(new PutObjectCommand({
       Bucket: this.bucket,
-      Key: key,
+      Key: target.key,
       Body: fs.createReadStream(filePath),
-      ContentType: contentType,
-      CacheControl: String(contentType || '').startsWith('image/') ? 'no-cache, must-revalidate' : undefined
+      ContentType: target.contentType,
+      CacheControl: String(target.contentType || '').startsWith('image/') ? 'no-cache, must-revalidate' : undefined
     }));
-    this.logger?.info(`R2 object stored: ${key}`);
-    return { key, url: this.publicUrl ? `${this.publicUrl}/${key}` : null, etag: response.ETag || null };
+    this.logger?.info(`R2 object stored: ${target.key}`);
+    return { key: target.key, url: this.publicUrl ? `${this.publicUrl}/${target.key}` : null, etag: response.ETag || null };
+  }
+
+  // A miniatura pode chegar como PNG ou como JPEG dependendo do caminho que a gerou.
+  // O tipo declarado pela chamada é só uma expectativa: quem manda é o conteúdo do arquivo.
+  async resolveImageTarget(filePath, key, contentType) {
+    if (!String(contentType || '').startsWith('image/')) {
+      return { key, contentType };
+    }
+
+    const detected = await this.detectImageType(filePath);
+    if (!detected || detected === contentType) {
+      return { key, contentType };
+    }
+
+    const nextKey = String(key).replace(/\.[^./]+$/, '') + IMAGE_EXTENSIONS[detected];
+    this.logger?.warn(`${path.basename(filePath)} é ${IMAGE_LABELS[detected]}, não ${IMAGE_LABELS[contentType] || contentType}. Enviando como ${nextKey}.`);
+    return { key: nextKey, contentType: detected };
+  }
+
+  async detectImageType(filePath) {
+    const handle = await fs.promises.open(filePath, 'r');
+    try {
+      const header = Buffer.alloc(12);
+      await handle.read(header, 0, header.length, 0);
+      if (header.subarray(0, 8).equals(Buffer.from('89504e470d0a1a0a', 'hex'))) return 'image/png';
+      if (header.subarray(0, 3).equals(Buffer.from('ffd8ff', 'hex'))) return 'image/jpeg';
+      if (header.subarray(0, 4).toString('ascii') === 'RIFF' && header.subarray(8, 12).toString('ascii') === 'WEBP') return 'image/webp';
+      return null;
+    } finally {
+      await handle.close();
+    }
   }
 
   async validateUploadFile(filePath, contentType) {
@@ -38,17 +73,9 @@ class R2Storage {
     }
     if (!String(contentType || '').startsWith('image/')) return true;
 
-    const handle = await fs.promises.open(filePath, 'r');
-    try {
-      const header = Buffer.alloc(8);
-      await handle.read(header, 0, header.length, 0);
-      const isPng = header.equals(Buffer.from('89504e470d0a1a0a', 'hex'));
-      const isJpeg = header.subarray(0, 3).equals(Buffer.from('ffd8ff', 'hex'));
-      if ((contentType === 'image/png' && !isPng) || (contentType === 'image/jpeg' && !isJpeg)) {
-        throw new Error(`Upload bloqueado: ${path.basename(filePath)} não contém uma imagem ${contentType === 'image/png' ? 'PNG' : 'JPEG'} válida.`);
-      }
-    } finally {
-      await handle.close();
+    const detected = await this.detectImageType(filePath);
+    if (detected !== contentType) {
+      throw new Error(`Upload bloqueado: ${path.basename(filePath)} não contém uma imagem ${IMAGE_LABELS[contentType] || contentType} válida.`);
     }
     return true;
   }

@@ -30,6 +30,8 @@ class SystemTest {
       { name: 'Cloudflare Image Provider', test: () => this.testCloudflareImageProvider() },
       { name: 'Cinematic Hybrid Renderer', test: () => this.testHybridRenderer() },
       { name: 'Storyboard Director Agent', test: () => this.testStoryboardDirector() },
+      { name: 'Thumbnail Upload Content Type', test: () => this.testThumbnailUploadContentType() },
+      { name: 'Dashboard Responsive Rules', test: () => this.testDashboardResponsiveRules() },
       { name: 'Evergreen Template Topics', test: () => this.testEvergreenTopics() },
       { name: 'Walkthrough Module', test: () => this.testWalkthroughModule() },
       { name: 'Logger System', test: () => this.testLogger() },
@@ -791,6 +793,103 @@ class SystemTest {
     await db.executeQuery('DELETE FROM storyboards WHERE id IN (?, ?)', [storyboard.id, aiStoryboard.id]);
     await db.close();
     this.logger.info('Storyboard director test completed successfully');
+  }
+
+  async testThumbnailUploadContentType() {
+    const { R2Storage } = require('./utils/r2-storage');
+    const { ProductionManagementAgent } = require('./agents/production-management-agent');
+    const fs = require('fs').promises;
+    const os = require('os');
+
+    const storage = new R2Storage();
+    const jpegPath = path.join(os.tmpdir(), `thumbnail-${Date.now()}.jpg`);
+    const pngPath = path.join(os.tmpdir(), `thumbnail-${Date.now()}.png`);
+    const textPath = path.join(os.tmpdir(), `thumbnail-${Date.now()}-fake.png`);
+
+    try {
+      // The thumbnail fallback writes a JPEG, and both upload sites ask for image/png.
+      // The bytes decide: the object is stored as JPEG under a .jpg key instead of being blocked.
+      await fs.writeFile(jpegPath, Buffer.from('ffd8ffe000104a46494600010100000100010000', 'hex'));
+      const jpegTarget = await storage.resolveImageTarget(jpegPath, 'productions/test/thumbnail.png', 'image/png');
+      if (jpegTarget.contentType !== 'image/jpeg' || !jpegTarget.key.endsWith('/thumbnail.jpg')) {
+        throw new Error(`A JPEG thumbnail was not remapped to a JPEG object: ${JSON.stringify(jpegTarget)}`);
+      }
+      await storage.validateUploadFile(jpegPath, jpegTarget.contentType);
+
+      await fs.writeFile(pngPath, Buffer.from('89504e470d0a1a0a0000000d49484452', 'hex'));
+      const pngTarget = await storage.resolveImageTarget(pngPath, 'productions/test/thumbnail.png', 'image/png');
+      if (pngTarget.contentType !== 'image/png' || pngTarget.key !== 'productions/test/thumbnail.png') {
+        throw new Error('A real PNG thumbnail should keep its key and content type');
+      }
+
+      // Anything that is not an image at all still has to be refused.
+      await fs.writeFile(textPath, 'not an image at all');
+      let rejected = false;
+      try {
+        await storage.validateUploadFile(textPath, 'image/png');
+      } catch (error) {
+        rejected = /não contém uma imagem PNG válida/i.test(error.message);
+      }
+      if (!rejected) {
+        throw new Error('R2 accepted a text file disguised as a PNG');
+      }
+
+      // The production fallback must keep the source extension so the copy is not a lie.
+      const agent = new ProductionManagementAgent({}, {});
+      await agent.setupDirectories();
+      agent.aiVideoGenerator.generateThumbnail = async () => {
+        throw new Error('AI thumbnail unavailable');
+      };
+      const processed = await agent.processThumbnail({ path: jpegPath, fileSize: 20 }, { title: 'Teste' });
+      if (path.extname(processed.path) !== '.jpg') {
+        throw new Error(`The thumbnail fallback renamed a JPEG to "${path.extname(processed.path)}"`);
+      }
+      if (processed.simulated) {
+        throw new Error('A copied thumbnail should not be reported as simulated');
+      }
+      const copiedTarget = await storage.resolveImageTarget(processed.path, 'productions/test/thumbnail.png', 'image/png');
+      if (copiedTarget.contentType !== 'image/jpeg') {
+        throw new Error('The copied thumbnail would still be uploaded as a PNG');
+      }
+      await fs.unlink(processed.path).catch(() => {});
+
+      const placeholder = await agent.processThumbnail({}, { title: 'Teste' });
+      if (!placeholder.simulated) {
+        throw new Error('A placeholder thumbnail must be reported as simulated');
+      }
+      await fs.access(placeholder.path);
+      await fs.unlink(placeholder.path).catch(() => {});
+    } finally {
+      await Promise.all([jpegPath, pngPath, textPath].map(file => fs.unlink(file).catch(() => {})));
+    }
+
+    this.logger.info('Thumbnail upload content type test completed successfully');
+  }
+
+  async testDashboardResponsiveRules() {
+    const fs = require('fs').promises;
+    const css = await fs.readFile('dashboard/styles.css', 'utf8');
+
+    // These rules are what keep the content detail view inside a phone viewport. The page
+    // overflowed by ~56px at 412px wide until they were added.
+    const required = [
+      { pattern: /\.video-empty \{[^}]*align-content: center/, reason: 'place-content on .video-empty sizes the column to max-content and overflows the video frame' },
+      { pattern: /\.detail-heading \{[^}]*flex-wrap: wrap/, reason: '.detail-heading must wrap so the action buttons do not push past the viewport' },
+      { pattern: /\.detail-heading > div \{[^}]*min-width: 0/, reason: '.detail-heading title block must be allowed to shrink' },
+      { pattern: /\.section-heading \{[^}]*flex-wrap: wrap/, reason: '.section-heading must wrap so its action button stays on screen' }
+    ];
+
+    for (const { pattern, reason } of required) {
+      if (!pattern.test(css)) {
+        throw new Error(`Dashboard CSS regression: ${reason}`);
+      }
+    }
+
+    if (/\.video-empty \{[^}]*place-content/.test(css) || /\.production-player \{[^}]*place-content/.test(css)) {
+      throw new Error('place-content: center is back on a video frame overlay and will overflow again');
+    }
+
+    this.logger.info('Dashboard responsive rules test completed successfully');
   }
 
   async testEvergreenTopics() {

@@ -261,18 +261,22 @@ class ProductionManagementAgent {
     } catch (error) {
       this.logger.error('AI thumbnail generation failed:', error);
       
-      // Fallback to original processing
+      // Fallback to original processing. The designer writes an optimized JPEG, so the copy
+      // keeps the source extension instead of assuming one, and the upload declares the
+      // format the bytes actually are.
+      const hasOriginal = Boolean(thumbnail.path) && await fs.access(thumbnail.path).then(() => true).catch(() => false);
+      const extension = hasOriginal ? (path.extname(thumbnail.path) || '.jpg') : '.placeholder';
       const productionThumbnailPath = path.join(
-        __dirname, '..', 'data', 'assets', 
-        `thumbnail_${Date.now()}.jpg`
+        __dirname, '..', 'data', 'assets',
+        `thumbnail_${Date.now()}${extension}`
       );
-      
-      if (thumbnail.path && await fs.access(thumbnail.path).then(() => true).catch(() => false)) {
+
+      if (hasOriginal) {
         const originalBuffer = await fs.readFile(thumbnail.path);
         await fs.writeFile(productionThumbnailPath, originalBuffer);
       } else {
         // Create placeholder
-        await fs.writeFile(productionThumbnailPath + '.placeholder', 'Thumbnail placeholder');
+        await fs.writeFile(productionThumbnailPath, 'Thumbnail placeholder');
       }
       
       return {
@@ -280,7 +284,7 @@ class ProductionManagementAgent {
         originalPath: thumbnail.path,
         dimensions: thumbnail.dimensions || { width: 1792, height: 1024 },
         fileSize: thumbnail.fileSize || 0,
-        simulated: !thumbnail.path
+        simulated: !hasOriginal
       };
     }
   }
