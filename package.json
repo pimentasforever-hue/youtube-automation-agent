@@ -20,6 +20,7 @@
     "credentials:setup": "node utils/credential-manager.js setup",
     "diagnose:images": "node utils/image-provider-check.js",
     "diagnose:video": "node utils/video-provider-check.js",
+    "diagnose:state": "node utils/state-check.js",
     "lint": "eslint ."
   },
   "dependencies": {

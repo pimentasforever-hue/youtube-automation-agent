@@ -34,6 +34,7 @@ class SystemTest {
       { name: 'Image Provider Diagnostics', test: () => this.testImageProviderDiagnostics() },
       { name: 'AI Scene Video Option', test: () => this.testAISceneVideoOption() },
       { name: 'Dashboard Responsive Rules', test: () => this.testDashboardResponsiveRules() },
+      { name: 'State Persistence Check', test: () => this.testStatePersistenceCheck() },
       { name: 'Evergreen Template Topics', test: () => this.testEvergreenTopics() },
       { name: 'Walkthrough Module', test: () => this.testWalkthroughModule() },
       { name: 'Logger System', test: () => this.testLogger() },
@@ -1148,6 +1149,47 @@ class SystemTest {
       fs.rm(path.join(__dirname, 'data', 'assets', id), { recursive: true, force: true })));
 
     this.logger.info('AI scene video option test completed successfully');
+  }
+
+  async testStatePersistenceCheck() {
+    const { isInsideApp, runStateCheck } = require('./utils/state-check');
+    const fs = require('fs').promises;
+
+    if (!isInsideApp(path.join(__dirname, 'config', 'tokens.json'))) {
+      throw new Error('A path inside the application folder must be reported as ephemeral');
+    }
+    if (isInsideApp('/data/youtube-tokens.json')) {
+      throw new Error('A mounted volume path must not be reported as ephemeral');
+    }
+
+    const savedDataDir = process.env.DATA_DIR;
+    const savedDatabaseUrl = process.env.DATABASE_URL;
+    delete process.env.DATA_DIR;
+    delete process.env.DATABASE_URL;
+
+    try {
+      const report = await runStateCheck();
+      if (report.database !== 'sqlite') {
+        throw new Error('Without DATABASE_URL the check must report the file database');
+      }
+      if (!report.warnings.some(warning => /apaga todo o histórico/.test(warning))) {
+        throw new Error('An ephemeral database must be reported as a warning');
+      }
+      if (!report.warnings.some(warning => /auth\/google/.test(warning))) {
+        throw new Error('Missing YouTube tokens must point to the reconnect flow');
+      }
+    } finally {
+      if (savedDataDir === undefined) delete process.env.DATA_DIR; else process.env.DATA_DIR = savedDataDir;
+      if (savedDatabaseUrl === undefined) delete process.env.DATABASE_URL; else process.env.DATABASE_URL = savedDatabaseUrl;
+    }
+
+    // O painel precisa reconectar sozinho quando o stream cai, senão os estados congelam.
+    const app = await fs.readFile('dashboard/app.js', 'utf8');
+    if (!/source\.onerror/.test(app) || !/setTimeout\(connectProductionEvents/.test(app)) {
+      throw new Error('The production event stream has no reconnection path');
+    }
+
+    this.logger.info('State persistence check test completed successfully');
   }
 
   async testDashboardResponsiveRules() {

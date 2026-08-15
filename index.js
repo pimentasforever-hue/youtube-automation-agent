@@ -118,6 +118,7 @@ class YouTubeAutomationAgent {
 
   async logCapabilitySummary() {
     const { checkFFmpeg, ffmpegInstallHint } = require('./utils/ffmpeg');
+    const { isInsideApp } = require('./utils/state-check');
     const creds = this.credentials.credentials || {};
 
     const hasText = this.credentials.hasAITextProvider();
@@ -142,7 +143,10 @@ class YouTubeAutomationAgent {
       { name: `AI scene video (Replicate${this.agents.production.aiVideoGenerator.hasAIVideoProvider() ? `, ${this.agents.production.aiVideoGenerator.replicateVideoModel}` : ''})`, ok: this.agents.production.aiVideoGenerator.hasAIVideoProvider(), hint: 'set REPLICATE_API_KEY to enable "Gerar cenas com IA" , without it scenes come from stock footage' },
       { name: 'Voice narration (TTS)', ok: hasTTS, hint: 'configure OpenAI, Gemini, ElevenLabs, or Azure Speech , otherwise videos are silent' },
       { name: 'Video assembly (FFmpeg)', ok: hasFFmpeg, hint: ffmpegInstallHint() },
-      { name: 'YouTube upload', ok: hasUpload, hint: 'run: npm run credentials:setup' }
+      { name: 'YouTube upload', ok: hasUpload, hint: 'run: npm run credentials:setup' },
+      // Estado dentro da pasta da aplicação some no próximo deploy: o canal desconecta e o
+      // histórico de produções desaparece, que é exatamente o sintoma difícil de diagnosticar.
+      { name: 'Persistent state (database + YouTube tokens)', ok: Boolean(process.env.DATABASE_URL) && !isInsideApp(this.credentials.tokensPath), hint: 'set DATABASE_URL and DATA_DIR to a mounted volume , otherwise a redeploy wipes the production history and disconnects the channel (npm run diagnose:state)' }
     ];
 
     console.log(chalk.cyan('\n🔎 Capability check:'));

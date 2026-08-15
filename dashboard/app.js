@@ -360,9 +360,23 @@ async function loadJobs() {
   }
 }
 
+// O stream cai quando o servidor reinicia ou o proxy corta a conexão. Sem reconexão, o
+// painel ficava parado até alguém recarregar a página.
+let productionStreamAttempt = 0;
+
 function connectProductionEvents() {
   if (!window.EventSource) return;
   const source = new window.EventSource('/production-events');
+  source.addEventListener('open', () => {
+    productionStreamAttempt = 0;
+    loadJobs();
+  });
+  source.onerror = () => {
+    source.close();
+    productionStreamAttempt += 1;
+    const delay = Math.min(30000, 1000 * Math.pow(2, productionStreamAttempt));
+    setTimeout(connectProductionEvents, delay);
+  };
   source.addEventListener('snapshot', (event) => {
     try { updateJobs(JSON.parse(event.data)); } catch (_error) { /* Polling remains available. */ }
   });
