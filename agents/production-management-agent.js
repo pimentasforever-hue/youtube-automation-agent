@@ -68,7 +68,7 @@ class ProductionManagementAgent {
         status: 'processing',
         assets: {
           script: await this.processScript(script),
-          thumbnail: await this.processThumbnail(thumbnail, script),
+          thumbnail: await this.processThumbnail(thumbnail, script, onProgress),
           audio: null, // Will be generated later
           video: null, // Will be generated later
           captions: null // Will be generated later
@@ -244,7 +244,7 @@ class ProductionManagementAgent {
     return ttsText;
   }
 
-  async processThumbnail(thumbnail, script) {
+  async processThumbnail(thumbnail, script, onProgress = () => {}) {
     try {
       // Try to generate AI thumbnail first
       const thumbnailScript = thumbnail.script || script || { title: thumbnail.title || 'Untitled Video' };
@@ -260,6 +260,16 @@ class ProductionManagementAgent {
       };
     } catch (error) {
       this.logger.error('AI thumbnail generation failed:', error);
+      // Sem isso a falha só existia no log do processo: o painel mostrava a produção
+      // quebrada sem dizer qual provedor recusou a imagem nem por quê.
+      const provider = error?.provider || this.aiVideoGenerator.imageProvider || 'desconhecido';
+      onProgress('thumbnail', 60, `A miniatura por IA falhou (${provider}): ${error.message}`, {
+        level: 'warning',
+        asset: 'thumbnail',
+        provider,
+        status: error?.status || null,
+        providerDetail: error?.providerDetail || null
+      });
       
       // Fallback to original processing. The designer writes an optimized JPEG, so the copy
       // keeps the source extension instead of assuming one, and the upload declares the

@@ -370,6 +370,8 @@ youtube-automation-agent/
 | "Processing publish queue" but nothing publishes | The queue log now shows what's waiting; content publishes at its scheduled time (default: next day 2 PM) |
 | YouTube API quota exceeded | Check quotas in Google Cloud Console; reduce posting frequency |
 | Content generation failed | Verify API keys and credits; check `logs/` |
+| `AI thumbnail generation failed` / scenes fail | Run `npm run diagnose:images -- --live` , it prints the resolved provider, the model and the provider's raw refusal (401/403 wrong token, 429 quota, 404 model, 400 content filter) |
+| Images silently simulated | `IMAGE_PROVIDER` points at a provider with no credentials. The startup capability check now names the provider and the reason |
 | Publishing failed | Re-authenticate YouTube OAuth tokens; check video format |
 
 Enable debug logging:

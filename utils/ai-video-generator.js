@@ -38,6 +38,7 @@ class AIVideoGenerator {
       || process.env.CLOUDFLARE_AI_API_TOKEN;
     this.cloudflareImageModel = process.env.CLOUDFLARE_IMAGE_MODEL
       || '@cf/black-forest-labs/flux-1-schnell';
+    this.openaiImageModel = process.env.OPENAI_IMAGE_MODEL || 'gpt-image-2';
     this.cloudflareImageSteps = Math.min(8, Math.max(1, Number(process.env.CLOUDFLARE_IMAGE_STEPS) || 4));
     this.cloudflareAI = Boolean(this.cloudflareAccountId && this.cloudflareAIApiToken);
     if (this.cloudflareAI) this.logger.info('Cloudflare Workers AI image service initialized');
@@ -250,7 +251,7 @@ class AIVideoGenerator {
       return localPaths;
     } catch (error) {
       this.logger.error('Visual asset generation failed:', error);
-      throw new Error(this.formatImageGenerationError(error));
+      throw this.wrapImageError(error, this.formatImageGenerationError(error));
     }
   }
 
@@ -305,8 +306,59 @@ class AIVideoGenerator {
       await sharp(buffer).png().toFile(imagePath);
       return imagePath;
     } catch (error) {
-      throw new Error(this.formatCloudflareImageError(error));
+      throw this.wrapImageError(error, this.formatCloudflareImageError(error));
     }
+  }
+
+  // A mensagem amigável some com o status e o corpo da resposta, que são justamente
+  // o que diz por que o provedor recusou. Guarda os dois no erro.
+  wrapImageError(error, message) {
+    if (error?.isImageProviderError) return error;
+    const wrapped = new Error(message);
+    wrapped.isImageProviderError = true;
+    wrapped.provider = this.imageProvider || null;
+    wrapped.status = Number(error?.response?.status || error?.status) || null;
+    wrapped.providerDetail = this.extractProviderDetail(error);
+    wrapped.cause = error;
+    return wrapped;
+  }
+
+  extractProviderDetail(error) {
+    const data = error?.response?.data;
+    if (data) {
+      try {
+        return (typeof data === 'string' ? data : JSON.stringify(data)).slice(0, 400);
+      } catch (stringifyError) {
+        return String(error?.message || '').slice(0, 400);
+      }
+    }
+    return String(error?.message || '').slice(0, 400);
+  }
+
+  // Estado real do provedor de imagens, usado pelo diagnóstico e pelo resumo de inicialização.
+  describeImageProvider() {
+    const requested = String(process.env.IMAGE_PROVIDER || '').trim().toLowerCase() || null;
+    const available = { cloudflare: Boolean(this.cloudflareAI), openai: Boolean(this.openai), gemini: Boolean(this.gemini) };
+    const models = { cloudflare: this.cloudflareImageModel, openai: this.openaiImageModel, gemini: process.env.GEMINI_IMAGE_MODEL || 'gemini-3.1-flash-image' };
+    const configured = this.hasConfiguredImageProvider();
+
+    let reason = null;
+    if (!this.imageProvider) {
+      reason = 'nenhuma credencial de imagem foi encontrada (Cloudflare Workers AI, OpenAI ou Gemini)';
+    } else if (!configured && requested) {
+      reason = `IMAGE_PROVIDER=${requested} está selecionado, mas as credenciais desse provedor não foram encontradas`;
+    } else if (!configured) {
+      reason = `o provedor ${this.imageProvider} não está configurado`;
+    }
+
+    return {
+      provider: this.imageProvider || null,
+      requested,
+      configured,
+      available,
+      model: this.imageProvider ? models[this.imageProvider] || null : null,
+      reason
+    };
   }
 
   formatCloudflareImageError(error) {
@@ -327,12 +379,13 @@ class AIVideoGenerator {
     const message = this.imageProvider === 'cloudflare'
       ? this.formatCloudflareImageError(error)
       : String(error?.message || 'O provedor de imagens não respondeu.');
-    return `Não foi possível gerar as imagens: ${message}`;
+    const provider = this.imageProvider ? ` (provedor: ${this.imageProvider})` : '';
+    return `Não foi possível gerar as imagens${provider}: ${message}`;
   }
 
   async generateOpenAIImage(prompt, imagePath) {
     const response = await this.openai.images.generate({
-      model: "gpt-image-2",
+      model: this.openaiImageModel,
       prompt: prompt,
       n: 1,
       size: "1536x1024",
@@ -1087,7 +1140,7 @@ class AIVideoGenerator {
       };
     } catch (error) {
       this.logger.error('Thumbnail generation failed:', error);
-      throw new Error(this.formatImageGenerationError(error));
+      throw this.wrapImageError(error, this.formatImageGenerationError(error));
     }
   }
 

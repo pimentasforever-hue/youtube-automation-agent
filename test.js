@@ -31,6 +31,7 @@ class SystemTest {
       { name: 'Cinematic Hybrid Renderer', test: () => this.testHybridRenderer() },
       { name: 'Storyboard Director Agent', test: () => this.testStoryboardDirector() },
       { name: 'Thumbnail Upload Content Type', test: () => this.testThumbnailUploadContentType() },
+      { name: 'Image Provider Diagnostics', test: () => this.testImageProviderDiagnostics() },
       { name: 'Dashboard Responsive Rules', test: () => this.testDashboardResponsiveRules() },
       { name: 'Evergreen Template Topics', test: () => this.testEvergreenTopics() },
       { name: 'Walkthrough Module', test: () => this.testWalkthroughModule() },
@@ -864,6 +865,97 @@ class SystemTest {
     }
 
     this.logger.info('Thumbnail upload content type test completed successfully');
+  }
+
+  async testImageProviderDiagnostics() {
+    const { AIVideoGenerator } = require('./utils/ai-video-generator');
+    const { ProductionManagementAgent } = require('./agents/production-management-agent');
+    const axios = require('axios');
+    const envKeys = ['OPENAI_API_KEY', 'GEMINI_API_KEY', 'CLOUDFLARE_ACCOUNT_ID', 'CLOUDFLARE_AI_API_TOKEN', 'IMAGE_PROVIDER', 'R2_ACCOUNT_ID'];
+    const savedEnv = {};
+    for (const key of envKeys) {
+      savedEnv[key] = process.env[key];
+      delete process.env[key];
+    }
+
+    try {
+      const cloudflareCreds = { cloudflare: { accountId: 'account-test', apiToken: 'token-test' } };
+
+      const auto = new AIVideoGenerator(cloudflareCreds).describeImageProvider();
+      if (auto.provider !== 'cloudflare' || !auto.configured || auto.reason) {
+        throw new Error(`Cloudflare credentials alone should resolve to a configured provider: ${JSON.stringify(auto)}`);
+      }
+      if (!auto.model) {
+        throw new Error('The provider description must report which image model is in use');
+      }
+
+      // The failure mode that reads as "the thumbnail just fails": IMAGE_PROVIDER points at a
+      // provider with no keys, so nothing can generate images even though other keys exist.
+      process.env.IMAGE_PROVIDER = 'openai';
+      const mismatch = new AIVideoGenerator(cloudflareCreds).describeImageProvider();
+      if (mismatch.configured || !/IMAGE_PROVIDER=openai/.test(mismatch.reason || '')) {
+        throw new Error(`A provider mismatch must be reported: ${JSON.stringify(mismatch)}`);
+      }
+      delete process.env.IMAGE_PROVIDER;
+
+      // The provider status and body must survive the friendly message.
+      const generator = new AIVideoGenerator(cloudflareCreds);
+      const originalPost = axios.post;
+      let thrown;
+      try {
+        axios.post = async () => {
+          const error = new Error('Request failed with status code 403');
+          error.response = { status: 403, data: { errors: [{ code: 10000, message: 'Authentication error' }] } };
+          throw error;
+        };
+        await generator.generateCloudflareImage('Miniatura de teste', path.join(require('os').tmpdir(), `unused-${Date.now()}.png`));
+      } catch (error) {
+        thrown = error;
+      } finally {
+        axios.post = originalPost;
+      }
+
+      if (!thrown || thrown.status !== 403) {
+        throw new Error(`The HTTP status was lost while wrapping the provider error: ${JSON.stringify(thrown && thrown.status)}`);
+      }
+      if (!/Authentication error/.test(thrown.providerDetail || '')) {
+        throw new Error('The provider response body was not kept for diagnosis');
+      }
+      if (!/permissão/i.test(thrown.message)) {
+        throw new Error('The 403 was not translated into a readable reason');
+      }
+
+      // A failed AI thumbnail has to reach the production log, not just the process log.
+      const agent = new ProductionManagementAgent({}, cloudflareCreds);
+      await agent.setupDirectories();
+      agent.aiVideoGenerator.generateThumbnail = async () => {
+        const error = new Error('A cota gratuita diária do Cloudflare Workers AI terminou.');
+        error.provider = 'cloudflare';
+        error.status = 429;
+        error.providerDetail = '{"errors":[{"code":10000}]}';
+        throw error;
+      };
+
+      const events = [];
+      const processed = await agent.processThumbnail({}, { title: 'Teste' }, (stage, progress, message, details) => {
+        events.push({ stage, progress, message, details });
+      });
+      const warning = events.find(event => event.details?.level === 'warning');
+      if (!warning) {
+        throw new Error('The thumbnail failure produced no warning event for the dashboard log');
+      }
+      if (!/cota gratuita/i.test(warning.message) || warning.details.provider !== 'cloudflare' || warning.details.status !== 429) {
+        throw new Error(`The warning event does not carry the provider reason: ${JSON.stringify(warning)}`);
+      }
+      await require('fs').promises.unlink(processed.path).catch(() => {});
+    } finally {
+      for (const key of envKeys) {
+        if (savedEnv[key] === undefined) delete process.env[key];
+        else process.env[key] = savedEnv[key];
+      }
+    }
+
+    this.logger.info('Image provider diagnostics test completed successfully');
   }
 
   async testDashboardResponsiveRules() {

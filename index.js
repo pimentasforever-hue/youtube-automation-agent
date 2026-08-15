@@ -122,7 +122,11 @@ class YouTubeAutomationAgent {
 
     const hasText = this.credentials.hasAITextProvider();
     const hasGemini = Boolean(creds.gemini?.apiKey || process.env.GEMINI_API_KEY);
-    const hasImages = Boolean(creds.openai?.apiKey || process.env.OPENAI_API_KEY || hasGemini);
+    // The old check looked only for an OpenAI or Gemini key, so it claimed images worked
+    // when IMAGE_PROVIDER pointed at a provider with no credentials, and claimed they did
+    // not when Cloudflare Workers AI was the configured provider. Ask the generator instead.
+    const imageProvider = this.agents.production.aiVideoGenerator.describeImageProvider();
+    const hasImages = imageProvider.configured;
     const hasTTS = Boolean(
       creds.openai?.apiKey || process.env.OPENAI_API_KEY ||
       creds.elevenLabs?.apiKey || process.env.ELEVENLABS_API_KEY ||
@@ -134,7 +138,7 @@ class YouTubeAutomationAgent {
 
     const capabilities = [
       { name: 'Script & strategy generation', ok: hasText, hint: 'configure an AI provider (npm run credentials:setup)' },
-      { name: 'Image generation (visuals/thumbnails)', ok: hasImages, hint: 'requires an OpenAI or Gemini API key , otherwise gradient slides are used' },
+      { name: `Image generation (visuals/thumbnails)${imageProvider.configured ? ` , ${imageProvider.provider} (${imageProvider.model})` : ''}`, ok: hasImages, hint: `${imageProvider.reason || 'no image provider configured'} , set IMAGE_PROVIDER plus the keys of that provider (npm run diagnose:images)` },
       { name: 'Voice narration (TTS)', ok: hasTTS, hint: 'configure OpenAI, Gemini, ElevenLabs, or Azure Speech , otherwise videos are silent' },
       { name: 'Video assembly (FFmpeg)', ok: hasFFmpeg, hint: ffmpegInstallHint() },
       { name: 'YouTube upload', ok: hasUpload, hint: 'run: npm run credentials:setup' }
@@ -973,7 +977,7 @@ class YouTubeAutomationAgent {
       seo: seoData,
       options,
       onProgress: (stage, progress, message, details) => {
-        if (jobId) this.updateProductionJob(jobId, stage, progress, message, null, { details });
+        if (jobId) this.updateProductionJob(jobId, stage, progress, message, null, { details, level: details?.level });
       }
     });
     productionData.settings = options;

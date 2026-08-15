@@ -18,6 +18,7 @@
     "agent:publishing": "node agents/publishing-scheduling-agent.js",
     "agent:analytics": "node agents/analytics-optimization-agent.js",
     "credentials:setup": "node utils/credential-manager.js setup",
+    "diagnose:images": "node utils/image-provider-check.js",
     "lint": "eslint ."
   },
   "dependencies": {
