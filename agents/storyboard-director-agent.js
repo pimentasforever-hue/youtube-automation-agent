@@ -190,18 +190,28 @@ class StoryboardDirectorAgent {
   }
 
   resolveStyle(script, options = {}) {
-    const requested = String(options.style || script.metadata?.strategy?.contentType || '').toLowerCase();
+    const requested = String(options.style || script.videoStyle?.name || script.metadata?.strategy?.contentType || '').toLowerCase();
     const preset = STYLE_PRESETS[requested]
       || STYLE_PRESETS[requested.replace(/\s+/g, '')]
       || (requested.includes('tutorial') ? STYLE_PRESETS.tutorial : null)
       || (requested.includes('story') ? STYLE_PRESETS.story : null)
       || STYLE_PRESETS.cinematic;
 
+    // O estilo definido pelo agente de roteiro manda: o preset só preenche o que faltar.
+    const directed = script.videoStyle || {};
+
     return {
       ...preset,
+      name: directed.name || preset.name,
+      look: directed.look || preset.look,
+      palette: directed.palette || preset.palette,
+      lighting: directed.lighting || preset.lighting,
+      motion: directed.motion || null,
       aspectRatio: options.aspectRatio || '16:9',
       tone: script.tone || 'engaging',
-      pacing: script.pacing || 'medium'
+      pacing: directed.pacing || script.pacing || 'medium',
+      instructions: script.instructions || options.instructions || null,
+      source: directed.name ? (directed.source || 'script') : 'preset'
     };
   }
 
@@ -276,9 +286,15 @@ class StoryboardDirectorAgent {
       return Math.round(duration);
     }
 
-    const match = String(duration || '').match(/^(\d+):(\d{1,2})$/);
-    if (match) {
-      return (parseInt(match[1], 10) * 60) + parseInt(match[2], 10);
+    const clock = String(duration || '').match(/^(\d+):(\d{1,2})$/);
+    if (clock) {
+      return (parseInt(clock[1], 10) * 60) + parseInt(clock[2], 10);
+    }
+
+    // Roteiros colados guardam a duração como "8 minutes".
+    const spelled = String(duration || '').match(/^(\d+)\s*(min|minute|minutes|minuto|minutos)$/i);
+    if (spelled) {
+      return parseInt(spelled[1], 10) * 60;
     }
 
     const fallback = scenes.reduce((total, scene) => total + scene.durationSeconds, 0);
@@ -480,7 +496,8 @@ Rules:
 - Keep subject names identical to the subject list.
 - Avoid unsafe imagery; suggest tension with light, sound or framing instead.
 
-Style: ${style.name}, ${style.look}, ${style.lighting}, palette ${style.palette}
+Style: ${style.name}, ${style.look}, ${style.lighting}, palette ${style.palette}${style.motion ? `, movement ${style.motion}` : ''}${style.instructions ? `
+Directions from the channel owner, follow them: ${style.instructions}` : ''}
 Subjects:
 ${bible.subjects.map(subject => `- ${subject.identifier}: ${subject.staticFeatures}; ${subject.dynamicFeatures}`).join('\n')}
 Scenes:
@@ -736,7 +753,8 @@ ${scenes.map(scene => `#${scene.idx} [${scene.beat}] ${scene.title} (${scene.dur
 
     shot.imagePrompt = sanitizeText(`${shot.firstFrame} ${subjectFeatures ? `Consistency: ${subjectFeatures}.` : ''} ${styleTail}`).slice(0, 1200);
     shot.lastFramePrompt = sanitizeText(`${shot.lastFrame} ${styleTail}`).slice(0, 1200);
-    shot.videoPrompt = sanitizeText(`${shot.motion} Shot: ${shot.shotSize}, ${shot.angle}, ${shot.movement}. ${styleTail}`).slice(0, 1200);
+    const directedMotion = style.motion ? ` Movement style: ${style.motion}.` : '';
+    shot.videoPrompt = sanitizeText(`${shot.motion} Shot: ${shot.shotSize}, ${shot.angle}, ${shot.movement}.${directedMotion} ${styleTail}`).slice(0, 1200);
     shot.stockQuery = sanitizeText(`${shot.sceneTitle} ${shot.shotSize} ${shot.movement}`).slice(0, 120);
     shot.negativePrompt = NEGATIVE_PROMPT;
 

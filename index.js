@@ -139,6 +139,7 @@ class YouTubeAutomationAgent {
     const capabilities = [
       { name: 'Script & strategy generation', ok: hasText, hint: 'configure an AI provider (npm run credentials:setup)' },
       { name: `Image generation (visuals/thumbnails)${imageProvider.configured ? ` , ${imageProvider.chain.join(' > ')}` : ''}`, ok: hasImages, hint: `${imageProvider.reason || 'no image provider configured'} , set IMAGE_PROVIDER plus the keys of that provider (npm run diagnose:images)` },
+      { name: `AI scene video (Replicate${this.agents.production.aiVideoGenerator.hasAIVideoProvider() ? `, ${this.agents.production.aiVideoGenerator.replicateVideoModel}` : ''})`, ok: this.agents.production.aiVideoGenerator.hasAIVideoProvider(), hint: 'set REPLICATE_API_KEY to enable "Gerar cenas com IA" , without it scenes come from stock footage' },
       { name: 'Voice narration (TTS)', ok: hasTTS, hint: 'configure OpenAI, Gemini, ElevenLabs, or Azure Speech , otherwise videos are silent' },
       { name: 'Video assembly (FFmpeg)', ok: hasFFmpeg, hint: ffmpegInstallHint() },
       { name: 'YouTube upload', ok: hasUpload, hint: 'run: npm run credentials:setup' }
@@ -268,8 +269,21 @@ class YouTubeAutomationAgent {
       privacy: typeof body.privacy === 'string' ? body.privacy : 'private',
       narration: body.narration !== false,
       captions: body.captions !== false,
-      autoPublish: body.autoPublish === true
+      autoPublish: body.autoPublish === true,
+      aiVideo: body.aiVideo === true,
+      instructions: null
     };
+
+    if (body.instructions !== undefined && body.instructions !== null) {
+      if (typeof body.instructions !== 'string') {
+        return { valid: false, status: 400, error: 'instructions must be a string' };
+      }
+      const instructions = body.instructions.trim();
+      if (instructions.length > 2000) {
+        return { valid: false, status: 400, error: 'As instruções devem ter no máximo 2000 caracteres.' };
+      }
+      value.instructions = instructions || null;
+    }
 
     if (!Number.isInteger(value.targetMinutes) || value.targetMinutes < 1 || value.targetMinutes > 90) {
       return { valid: false, status: 400, error: 'A duração deve ser um número inteiro entre 1 e 90 minutos.' };
@@ -705,14 +719,19 @@ class YouTubeAutomationAgent {
         if (!['failed', 'simulated'].includes(content.status)) return res.status(409).json({ success: false, error: 'Este conteúdo não precisa de uma nova tentativa.' });
         if (!content.script.trim()) return res.status(422).json({ success: false, error: 'O roteiro original não está disponível para uma nova tentativa.' });
         const jobId = `job_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
+        // Uma nova tentativa repete o que o usuário escolheu na primeira vez, incluindo as
+        // instruções e a opção de cenas por IA. Antes o retry recomeçava com outro formato.
+        const previous = content.settings || {};
         const options = {
           script: content.script,
           targetMinutes: content.targetMinutes,
           sceneCount: content.sceneCount,
-          style: 'ethereal',
-          privacy: 'private',
-          narration: true,
-          captions: true,
+          style: previous.style || 'ethereal',
+          privacy: previous.privacy || 'private',
+          instructions: previous.instructions || null,
+          aiVideo: previous.aiVideo === true,
+          narration: previous.narration !== false,
+          captions: previous.captions !== false,
           autoPublish: false,
           retryOf: content.id,
           productionId: content.id
@@ -943,16 +962,17 @@ class YouTubeAutomationAgent {
     // Step 2: Script Writing
     if (jobId) this.updateProductionJob(jobId, 'script', 25, 'Escrevendo o roteiro');
     const script = options.script
-      ? await this.agents.scriptWriter.createScriptFromText(options.script, strategy, { targetMinutes: strategy.targetMinutes })
-      : await this.agents.scriptWriter.generateScript(strategy, { targetMinutes: strategy.targetMinutes });
-    this.logger.info(`Script generated: ${script.title}`);
+      ? await this.agents.scriptWriter.createScriptFromText(options.script, strategy, { targetMinutes: strategy.targetMinutes, instructions: options.instructions })
+      : await this.agents.scriptWriter.generateScript(strategy, { targetMinutes: strategy.targetMinutes, instructions: options.instructions });
+    this.logger.info(`Script generated: ${script.title}${script.videoStyle ? ` (estilo visual: ${script.videoStyle.name})` : ''}`);
     
     // Step 3: Storyboard Direction
     if (jobId) this.updateProductionJob(jobId, 'storyboard', 34, 'Planejando os planos e a continuidade visual');
     const storyboard = await this.agents.storyboardDirector.generateStoryboard(script, {
-      style,
+      style: script.videoStyle?.name || style,
       sceneCount: options.sceneCount,
-      aspectRatio: options.aspectRatio
+      aspectRatio: options.aspectRatio,
+      instructions: options.instructions
     });
     this.logger.info(`Storyboard designed: ${storyboard.shots.length} shots, ${storyboard.cameras.length} cameras`);
     

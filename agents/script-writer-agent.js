@@ -80,6 +80,8 @@ class ScriptWriterAgent {
         tone: template.tone,
         pacing: template.pacing,
         keywords: strategy.keywords,
+        videoStyle: this.normalizeVideoStyle(null, strategy, template),
+        instructions: this.normalizeInstructions(options.instructions),
         metadata: {
           strategy: strategy,
           generatedAt: new Date().toISOString(),
@@ -123,8 +125,43 @@ class ScriptWriterAgent {
       metadata: { strategy, generatedAt: new Date().toISOString(), version: '1.0', generationSource: 'user' }
     };
     if (options.targetMinutes) script.metadata.targetMinutes = options.targetMinutes;
+    // Um roteiro colado também precisa de direção visual: sem ela cada etapa seguinte
+    // inventava a própria estética.
+    script.instructions = this.normalizeInstructions(options.instructions);
+    script.videoStyle = await this.defineVideoStyle(script.fullScript, strategy, options);
     await this.db.saveScript(script);
     return script;
+  }
+
+  async defineVideoStyle(text, strategy, options = {}) {
+    const fallback = this.normalizeVideoStyle(null, strategy, { pacing: 'provided' });
+    if (!this.aiTextService.isAvailable()) {
+      return fallback;
+    }
+
+    const sample = String(text || '').slice(0, 6000);
+    const prompt = `You are the director deciding how a YouTube video should look.
+Return only valid JSON with this exact shape:
+{"name":"short style name","look":"lens, depth of field, texture, era","palette":"dominant colors","lighting":"how scenes are lit","motion":"how camera and subjects move","reason":"one sentence on why this fits"}
+
+Describe only what a camera can capture, no abstract adjectives. This direction is fed to the image and video generators, so it must be concrete and repeatable across scenes.
+
+Content type: ${strategy?.contentType || 'story'}
+Topic: ${strategy?.topic || 'not informed'}${this.formatInstructions(options.instructions)}
+
+SCRIPT:
+${sample}`;
+
+    try {
+      const response = await this.aiTextService.generateText(prompt, { maxTokens: 500, temperature: 0.5 });
+      const parsed = this.parseAIJsonResponse(response);
+      const style = this.normalizeVideoStyle(parsed, strategy, { pacing: 'provided' });
+      this.logger.info(`Video style defined by AI: ${style.name}`);
+      return style;
+    } catch (error) {
+      this.logger.warn(`Could not define the video style with AI, using the preset: ${error.message}`);
+      return fallback;
+    }
   }
 
   async generateScriptWithAI(strategy, template, options = {}) {
@@ -133,7 +170,7 @@ class ScriptWriterAgent {
       return null;
     }
 
-    const prompt = `You are writing a YouTube script plan.
+    const prompt = `You are writing a YouTube script plan and directing how the video should look.
 Return only valid JSON with this exact shape:
 {
   "title": "compelling title under 100 characters",
@@ -141,7 +178,15 @@ Return only valid JSON with this exact shape:
   "sections": [
     { "title": "section title", "content": ["spoken script bullet"], "duration": 60 }
   ],
-  "cta": "clear call to action"
+  "cta": "clear call to action",
+  "videoStyle": {
+    "name": "short name for the visual style, e.g. cinematic, documentary, tutorial, story, explainer",
+    "look": "what the frame looks like: lens, depth of field, texture, era",
+    "palette": "the dominant colors",
+    "lighting": "how the scenes are lit",
+    "motion": "how the camera and the subjects move",
+    "reason": "one sentence on why this style fits this script"
+  }
 }
 
 Topic: ${strategy.topic}
@@ -152,7 +197,8 @@ Desired length: approximately ${options.targetMinutes || strategy.targetMinutes 
 Tone: ${template.tone}
 Pacing: ${template.pacing}
 Keywords: ${(strategy.keywords || []).join(', ')}
-Avoid fabricated statistics, unsupported claims, and fake urgency.`;
+Avoid fabricated statistics, unsupported claims, and fake urgency.
+The videoStyle is a direction for the image and video generators downstream: describe only what a camera can capture, no abstract adjectives.${this.formatInstructions(options.instructions)}`;
 
     try {
       const response = await this.aiTextService.generateText(prompt, {
@@ -181,6 +227,8 @@ Avoid fabricated statistics, unsupported claims, and fake urgency.`;
         tone: template.tone,
         pacing: template.pacing,
         keywords: strategy.keywords || [],
+        videoStyle: this.normalizeVideoStyle(parsed.videoStyle, strategy, template),
+        instructions: this.normalizeInstructions(options.instructions),
         metadata: {
           strategy,
           generatedAt: new Date().toISOString(),
@@ -760,6 +808,49 @@ Avoid fabricated statistics, unsupported claims, and fake urgency.`;
     fullScript += `KEYWORDS: ${script.keywords.join(', ')}\n`;
     
     return fullScript;
+  }
+
+  formatInstructions(instructions) {
+    const text = this.normalizeInstructions(instructions);
+    if (!text) return '';
+    return `\nDirections from the channel owner, follow them for both the script and the videoStyle:\n${text}`;
+  }
+
+  normalizeInstructions(instructions) {
+    const text = sanitizeText(String(instructions || '')).trim();
+    return text ? text.slice(0, 2000) : null;
+  }
+
+  // O estilo visual sai do roteiro e desce para o storyboard e para os geradores de imagem
+  // e vídeo. Sem ele cada etapa inventava a própria estética.
+  normalizeVideoStyle(videoStyle, strategy, template = {}) {
+    const presets = {
+      story: { name: 'story', look: 'narrative cinema still, character driven framing, shallow depth of field', palette: 'deep blues with gold highlights', lighting: 'motivated practical lights with strong shadows', motion: 'slow deliberate camera moves that follow the subject' },
+      educational: { name: 'documentary', look: 'documentary photography, natural lens, honest framing', palette: 'warm earth tones with parchment neutrals', lighting: 'soft available light from a single window', motion: 'steady frames with occasional slow push in' },
+      explainer: { name: 'explainer', look: 'clean editorial composition with generous negative space', palette: 'violet, cyan and off white', lighting: 'even diffused light with soft gradients', motion: 'measured pans that reveal one idea at a time' },
+      list: { name: 'cinematic', look: 'high contrast cinematic still, anamorphic flare', palette: 'teal shadows with amber highlights', lighting: 'hard key light with rim separation', motion: 'quick cuts with short punchy moves' },
+      tutorial: { name: 'tutorial', look: 'clean studio setup, uncluttered background', palette: 'white, deep blue and one accent color', lighting: 'bright even softbox lighting', motion: 'locked off frames with small reframes' }
+    };
+
+    const contentType = String(strategy?.contentType || '').toLowerCase();
+    const base = presets[contentType] || presets.story;
+    const provided = videoStyle && typeof videoStyle === 'object' ? videoStyle : {};
+
+    const pick = (key) => {
+      const value = sanitizeText(String(provided[key] || '')).trim();
+      return value ? value.slice(0, 240) : base[key];
+    };
+
+    return {
+      name: pick('name'),
+      look: pick('look'),
+      palette: pick('palette'),
+      lighting: pick('lighting'),
+      motion: pick('motion'),
+      pacing: template.pacing || 'medium',
+      reason: sanitizeText(String(provided.reason || '')).trim().slice(0, 240) || `Estilo padrão para o formato ${strategy?.contentType || 'história'}.`,
+      source: provided.name ? 'ai' : 'template'
+    };
   }
 
   estimateDuration(mainContent) {

@@ -40,6 +40,7 @@ class AIVideoGenerator {
       || '@cf/black-forest-labs/flux-1-schnell';
     this.openaiImageModel = process.env.OPENAI_IMAGE_MODEL || 'gpt-image-2';
     this.imageProviderCooldowns = new Map();
+    this.replicateVideoModel = process.env.REPLICATE_VIDEO_MODEL || 'wan-video/wan-2.7-i2v';
     this.cloudflareImageSteps = Math.min(8, Math.max(1, Number(process.env.CLOUDFLARE_IMAGE_STEPS) || 4));
     this.cloudflareAI = Boolean(this.cloudflareAccountId && this.cloudflareAIApiToken);
     if (this.cloudflareAI) this.logger.info('Cloudflare Workers AI image service initialized');
@@ -662,28 +663,93 @@ class AIVideoGenerator {
     }
   }
 
-  async generateReplicateVideo(script, visualAssets, audioPath, outputPath) {
-    const output = await this.replicate.run(
-      "wan-video/wan-2.7-i2v",
-      {
-        input: {
-          image: visualAssets[0],
-          prompt: script.title || "smooth cinematic motion",
-          duration: 5,
-          resolution: "720p"
-        }
-      }
-    );
+  hasAIVideoProvider() {
+    return Boolean(this.replicate);
+  }
 
-    // Download the generated video
-    if (output && output.length > 0) {
-      await this.downloadVideo(output[0], outputPath);
-      
-      // Add audio track
-      await this.addAudioToVideo(outputPath, audioPath, outputPath);
+  // Anima uma cena de verdade: parte da imagem do plano (image to video) e usa a descrição
+  // de movimento do storyboard como prompt, em vez de buscar um clipe genérico de acervo.
+  async generateSceneVideo(prompt, outputPath, { imagePath = null, durationSeconds = 5 } = {}) {
+    if (!this.replicate) {
+      throw new Error('A geração de vídeo por IA precisa de uma chave do Replicate (REPLICATE_API_KEY).');
     }
 
-    return outputPath;
+    const input = {
+      prompt: String(prompt || 'smooth cinematic motion').slice(0, 1500),
+      duration: Math.min(10, Math.max(3, Math.round(Number(durationSeconds)) || 5)),
+      resolution: process.env.REPLICATE_VIDEO_RESOLUTION || '720p'
+    };
+    if (imagePath) input.image = await this.toDataUri(imagePath);
+
+    const started = Date.now();
+    let output;
+    try {
+      output = await this.replicate.run(this.replicateVideoModel, { input });
+    } catch (error) {
+      throw new Error(this.formatAIVideoError(error));
+    }
+
+    const url = await this.resolveReplicateOutputUrl(output);
+    if (!url) throw new Error('O Replicate não retornou um vídeo para a cena.');
+
+    await fs.mkdir(path.dirname(outputPath), { recursive: true });
+    await this.downloadVideo(url, outputPath);
+    const stats = await fs.stat(outputPath);
+    if (!stats.isFile() || stats.size < 10000) {
+      await fs.unlink(outputPath).catch(() => {});
+      throw new Error('O vídeo gerado pela IA chegou vazio ou incompleto.');
+    }
+
+    return {
+      path: outputPath,
+      provider: `Replicate (${this.replicateVideoModel})`,
+      model: this.replicateVideoModel,
+      seconds: Math.round((Date.now() - started) / 1000)
+    };
+  }
+
+  // O cliente do Replicate já devolveu string, array e objeto com url() dependendo da versão
+  // e do modelo, então todas as formas são aceitas.
+  async resolveReplicateOutputUrl(output) {
+    if (!output) return null;
+    if (typeof output === 'string') return output;
+    if (Array.isArray(output)) {
+      for (const item of output) {
+        const url = await this.resolveReplicateOutputUrl(item);
+        if (url) return url;
+      }
+      return null;
+    }
+    if (typeof output.url === 'function') return String(await output.url());
+    if (typeof output.url === 'string') return output.url;
+    if (output.output) return await this.resolveReplicateOutputUrl(output.output);
+    if (typeof output.href === 'string') return output.href;
+    return null;
+  }
+
+  async toDataUri(filePath) {
+    const buffer = await fs.readFile(filePath);
+    const extension = path.extname(filePath).toLowerCase();
+    const mime = extension === '.jpg' || extension === '.jpeg' ? 'image/jpeg' : extension === '.webp' ? 'image/webp' : 'image/png';
+    return `data:${mime};base64,${buffer.toString('base64')}`;
+  }
+
+  formatAIVideoError(error) {
+    const status = Number(error?.response?.status || error?.status) || null;
+    const detail = String(error?.message || '').slice(0, 300);
+    if (status === 402 || /insufficient credit|billing/i.test(detail)) {
+      return 'A conta do Replicate está sem créditos para gerar vídeo.';
+    }
+    if (status === 401 || status === 403) {
+      return 'A chave do Replicate não tem permissão para esse modelo de vídeo.';
+    }
+    if (status === 404) {
+      return `O modelo de vídeo ${this.replicateVideoModel} não foi encontrado no Replicate.`;
+    }
+    if (/timeout|timed out|aborted/i.test(detail)) {
+      return 'O Replicate demorou demais para devolver a cena.';
+    }
+    return detail || 'O Replicate não conseguiu gerar a cena.';
   }
 
   async filterMediaAssets(visualAssets = []) {

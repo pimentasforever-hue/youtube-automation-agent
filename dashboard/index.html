@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light dark">
   <title>Ecos da Escritura</title>
-  <link rel="stylesheet" href="/styles.css?v=20260815-detail-layout">
+  <link rel="stylesheet" href="/styles.css?v=20260815-ai-scenes">
 </head>
 <body class="app-page">
   <a class="skip-link" href="#main-content">Ir para o conteúdo</a>
@@ -93,13 +93,14 @@
             <div class="script-metrics" aria-live="polite"><span><strong id="script-word-count">0</strong> palavras</span><span><strong id="script-duration">0 min</strong> de narração estimada</span><span><strong id="visual-rhythm">60 s</strong> por cena</span></div>
             <div class="script-actions"><button class="secondary-button" id="review-script-button" type="button"><span>Revisar com IA</span></button><small>A IA analisa coerência, clareza, ritmo, repetições e pontos que precisam de verificação.</small></div>
             <section id="script-review" class="script-review" aria-live="polite" hidden><div class="script-review-heading"><div><p class="eyebrow">Revisão por IA</p><h3>Relatório editorial e configuração sugerida</h3></div><button class="text-button" id="close-script-review" type="button">Fechar</button></div><div id="script-review-content"></div><div id="review-suggestions" class="review-suggestions"></div><button class="primary-button" id="apply-review-suggestions" type="button"><span>Aplicar sugestões aos campos</span></button></section>
+            <div><label for="instructions">Instruções para os agentes</label><textarea id="instructions" name="instructions" rows="3" maxlength="2000" placeholder="Ex.: manter tom solene, cenas noturnas no deserto, sem rostos em close, citar o versículo na abertura."></textarea><small class="field-explanation">O agente de roteiro usa isso para escrever e para definir o estilo visual, que orienta as imagens e as cenas.</small></div>
             <div class="form-row">
               <div><label for="style">Formato</label><select id="style" name="style"><option value="story">História narrada</option><option value="educational">Estudo bíblico</option><option value="explainer">Explicação</option><option value="list">Lista temática</option></select></div>
               <div><label for="target-minutes">Duração aproximada em minutos</label><input id="target-minutes" name="targetMinutes" type="number" min="1" max="90" value="8" required><small class="field-explanation">De 1 minuto até 1 hora e 30 minutos.</small></div>
             </div>
             <div class="form-row"><div><label for="scene-count">Quantidade de cenas</label><div class="field-with-action"><input id="scene-count" type="number" min="3" max="180" value="8" required><button class="secondary-button compact" id="suggest-scenes-button" type="button">Sugerir com IA</button></div><small id="scene-suggestion" class="field-explanation" aria-live="polite">A IA considera a duração, o formato e o roteiro para manter um bom ritmo visual.</small></div><div><label for="privacy">Visibilidade no YouTube</label><select id="privacy"><option value="private">Privado</option><option value="unlisted">Não listado</option><option value="public">Público</option></select></div></div>
-            <div class="option-grid"><label><input id="narration" type="checkbox" checked> Gerar narração</label><label><input id="captions" type="checkbox" checked> Gerar legendas</label><label><input id="auto-publish" type="checkbox"> Publicar automaticamente</label></div>
-            <div class="creation-summary"><span>O fluxo inclui roteiro, narração, imagens, montagem e preparação para publicação.</span></div>
+            <div class="option-grid"><label><input id="ai-video" type="checkbox"> Gerar cenas com IA</label><label><input id="narration" type="checkbox" checked> Gerar narração</label><label><input id="captions" type="checkbox" checked> Gerar legendas</label><label><input id="auto-publish" type="checkbox"> Publicar automaticamente</label></div>
+            <div class="creation-summary"><span>O fluxo inclui roteiro, estilo visual, storyboard, narração, cenas, montagem e preparação para publicação. Com cenas por IA cada plano é animado pelo Replicate, e o acervo entra como reserva.</span></div>
             <div id="form-message" class="form-message" role="status" aria-live="polite"></div>
             <button class="primary-button" id="generate-button" type="submit"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 3 14 9-14 9z"/></svg><span>Iniciar produção</span></button>
           </form>
@@ -117,6 +118,6 @@
     </main>
   </div>
   <dialog id="delete-content-dialog" class="confirm-dialog"><form method="dialog"><p class="eyebrow">Ação permanente</p><h2>Apagar este conteúdo?</h2><p id="delete-content-description">O vídeo e seus arquivos serão removidos do sistema. Se já estiver publicado no YouTube, a publicação não será apagada do canal.</p><div id="delete-content-message" class="form-message" role="status"></div><div class="form-actions"><button class="secondary-button" value="cancel">Cancelar</button><button class="danger-button" id="confirm-delete-content" value="confirm">Apagar conteúdo</button></div></form></dialog>
-  <script src="/app.js?v=20260814-real-worker-logs" defer></script>
+  <script src="/app.js?v=20260815-ai-scenes" defer></script>
 </body>
 </html>

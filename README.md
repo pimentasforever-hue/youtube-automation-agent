@@ -79,13 +79,31 @@ Each agent handles one stage of the pipeline:
 | Agent | Role |
 |-------|------|
 | **Content Strategy** | Analyzes YouTube trends, identifies topics, plans content calendar |
-| **Script Writer** | Generates scripts with hooks, storytelling, CTAs |
+| **Script Writer** | Generates scripts with hooks, storytelling, CTAs, and defines the video's visual style |
 | **Storyboard Director** | Breaks the script into scenes and shots, keeps camera and subject continuity, writes the render prompts |
 | **Thumbnail Designer** | Creates thumbnails, runs A/B variations |
 | **SEO Optimizer** | Keywords, titles, descriptions, tags |
 | **Production** | Coordinates TTS audio, image assets, video assembly |
 | **Publishing** | Uploads, schedules, manages playlists |
 | **Analytics** | Tracks performance, feeds insights back to strategy |
+
+## Scene sources
+
+Every production turns the storyboard's shots into scene clips. Where those clips come from
+is a choice on the creation form:
+
+| Option | What happens |
+|--------|--------------|
+| **Gerar cenas com IA** (off, default) | Scenes come from the stock providers (Pexels/Pixabay), with a generated still as contingency |
+| **Gerar cenas com IA** (on) | Each shot's still is generated first, then animated by Replicate (image to video) using the shot's motion description. Stock footage still covers any scene the model refuses, so one failure does not fail the production |
+
+The **Instruções para os agentes** field on the same form is free text: the script writer uses
+it while writing and while deciding the visual style, and the storyboard passes it into the
+shot design. The style the script writer picks (look, palette, lighting, motion) is what the
+image and video prompts are built from, so a video keeps one look end to end.
+
+AI scenes need `REPLICATE_API_KEY`. Without it the checkbox is honoured with a warning in the
+production log and the run falls back to stock footage.
 
 ## Storyboard Direction
 

@@ -617,7 +617,8 @@ class Database {
       status: row.status,
       script: row.full_script || assets.sourceScript || parts.map(flatten).filter(Boolean).join('\n\n'),
       targetMinutes: Math.max(1, parseInt(row.estimated_duration, 10) || 8),
-      sceneCount: Math.max(1, assets.video?.visualAssets?.length || 8)
+      sceneCount: Math.max(1, assets.video?.visualAssets?.length || 8),
+      settings: assets.settings || {}
     };
   }
 

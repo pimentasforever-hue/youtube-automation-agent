@@ -67,6 +67,9 @@ class ProductionManagementAgent {
         storyboard,
         status: 'processing',
         assets: {
+          // As opções ficam junto dos assets porque é o que sobrevive no banco, e é delas
+          // que uma nova tentativa reconstrói a produção do jeito que o usuário pediu.
+          settings: options,
           script: await this.processScript(script),
           thumbnail: await this.processThumbnail(thumbnail, script, onProgress),
           audio: null, // Will be generated later
@@ -359,13 +362,47 @@ class ProductionManagementAgent {
       const sceneDirectory = path.join(__dirname, '..', 'data', 'assets', productionData.id, 'scenes');
       await fs.mkdir(sceneDirectory, { recursive: true });
       
+      // Com "Gerar cenas com IA" marcado, cada cena é animada a partir da imagem do plano.
+      // O acervo continua como reserva: uma cena que a IA recusa não derruba a produção.
+      const aiScenesRequested = productionData.settings?.aiVideo === true;
+      const aiScenesEnabled = aiScenesRequested && this.aiVideoGenerator.hasAIVideoProvider();
+      if (aiScenesRequested && !aiScenesEnabled) {
+        onProgress('visuals', 66, 'Cenas por IA pedidas, mas o Replicate não está configurado. Usando acervo e imagens.', {
+          level: 'warning', asset: 'scene', requested: 'ai-video'
+        });
+        this.logger.warn('AI scene generation requested without a Replicate key; falling back to stock footage');
+      }
+
       for (let index = 0; index < visualPrompts.length; index += 1) {
         const prompt = visualPrompts[index];
+        const shot = shotPlan[index] || null;
+        const clipPath = path.join(sceneDirectory, `scene-${String(index + 1).padStart(4, '0')}.mp4`);
         let scene;
-        if (this.aiVideoGenerator.hasStockVideoProvider()) {
+
+        if (aiScenesEnabled) {
           try {
-            const clipPath = path.join(sceneDirectory, `scene-${String(index + 1).padStart(4, '0')}.mp4`);
-            scene = await this.aiVideoGenerator.fetchStockVideo(shotPlan[index]?.stockQuery || prompt, clipPath, usedStockIds);
+            const stillPath = path.join(sceneDirectory, `scene-${String(index + 1).padStart(4, '0')}-frame.png`);
+            await this.aiVideoGenerator.generateImage(prompt, stillPath);
+            const clip = await this.aiVideoGenerator.generateSceneVideo(shot?.videoPrompt || prompt, clipPath, {
+              imagePath: stillPath,
+              durationSeconds: shot?.durationSeconds || 5
+            });
+            scene = { ...clip, type: 'video', generatedBy: 'ai' };
+            onProgress('visuals', 66 + Math.floor((index / requestedScenes) * 8), `Cena ${index + 1} gerada por IA em ${clip.seconds}s`, {
+              asset: 'scene', mediaType: 'video', provider: clip.provider, completed: index + 1, total: requestedScenes
+            });
+          } catch (error) {
+            this.logger.warn(`AI scene ${index + 1} failed: ${error.message}`);
+            onProgress('visuals', 66 + Math.floor((index / requestedScenes) * 8), `A cena ${index + 1} por IA falhou: ${error.message}`, {
+              level: 'warning', asset: 'scene', completed: index + 1, total: requestedScenes
+            });
+          }
+        }
+
+        if (!scene && this.aiVideoGenerator.hasStockVideoProvider()) {
+          try {
+            scene = await this.aiVideoGenerator.fetchStockVideo(shot?.stockQuery || prompt, clipPath, usedStockIds);
+            if (scene) scene.type = 'video';
           } catch (error) {
             this.logger.warn(`Stock video unavailable for scene ${index + 1}: ${error.message}`);
           }
@@ -374,8 +411,6 @@ class ProductionManagementAgent {
         if (!scene) {
           const assets = await this.aiVideoGenerator.generateVisualAssets(prompt, 'cinematic', 1);
           scene = { path: assets[0], provider: this.aiVideoGenerator.imageProvider || 'image', type: 'image' };
-        } else {
-          scene.type = 'video';
         }
 
         visualAssets.push(scene.path);
@@ -389,7 +424,7 @@ class ProductionManagementAgent {
         }
         const completed = index + 1;
         const progress = 66 + Math.floor((completed / requestedScenes) * 8);
-        const mediaLabel = scene.type === 'video' ? 'Clipe' : 'Imagem de contingência';
+        const mediaLabel = scene.generatedBy === 'ai' ? 'Cena por IA' : scene.type === 'video' ? 'Clipe de acervo' : 'Imagem de contingência';
         onProgress('visuals', progress, `${mediaLabel} ${completed} de ${requestedScenes} preparado${uploaded ? ' e enviado para o R2' : ''}`, { asset: 'scene', mediaType: scene.type, provider: scene.provider, completed, total: requestedScenes, objectKey: uploaded?.key || null });
       }
 
@@ -408,7 +443,8 @@ class ProductionManagementAgent {
         format: 'mp4',
         resolution: '1920x1080',
         fps: 30,
-        generatedWith: 'Hybrid'
+        generatedWith: aiScenesEnabled ? 'AI scenes' : 'Hybrid',
+        aiScenes: sceneAssets.filter(scene => scene.generatedBy === 'ai').length
       };
       
       productionData.timeline.videoGenerated = new Date().toISOString();

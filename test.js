@@ -32,6 +32,7 @@ class SystemTest {
       { name: 'Storyboard Director Agent', test: () => this.testStoryboardDirector() },
       { name: 'Thumbnail Upload Content Type', test: () => this.testThumbnailUploadContentType() },
       { name: 'Image Provider Diagnostics', test: () => this.testImageProviderDiagnostics() },
+      { name: 'AI Scene Video Option', test: () => this.testAISceneVideoOption() },
       { name: 'Dashboard Responsive Rules', test: () => this.testDashboardResponsiveRules() },
       { name: 'Evergreen Template Topics', test: () => this.testEvergreenTopics() },
       { name: 'Walkthrough Module', test: () => this.testWalkthroughModule() },
@@ -996,6 +997,157 @@ class SystemTest {
     }
 
     this.logger.info('Image provider diagnostics test completed successfully');
+  }
+
+  async testAISceneVideoOption() {
+    const { AIVideoGenerator } = require('./utils/ai-video-generator');
+    const { ProductionManagementAgent } = require('./agents/production-management-agent');
+    const { ScriptWriterAgent } = require('./agents/script-writer-agent');
+    const { StoryboardDirectorAgent } = require('./agents/storyboard-director-agent');
+    const fs = require('fs').promises;
+
+    // 1. The form has to expose the option and the instructions field, and send both.
+    const html = await fs.readFile('dashboard/index.html', 'utf8');
+    const app = await fs.readFile('dashboard/app.js', 'utf8');
+    if (!/id="ai-video" type="checkbox"/.test(html)) {
+      throw new Error('The "Gerar cenas com IA" checkbox is missing from the form');
+    }
+    if (!/id="instructions"/.test(html)) {
+      throw new Error('The instructions field is missing from the form');
+    }
+    if (!/aiVideo: \$\('ai-video'\)\.checked/.test(app) || !/instructions: \$\('instructions'\)\.value/.test(app)) {
+      throw new Error('The dashboard does not send aiVideo/instructions to the API');
+    }
+
+    // 2. The API accepts them and rejects oversized instructions.
+    const { YouTubeAutomationAgent } = require('./index');
+    const api = new YouTubeAutomationAgent();
+    const accepted = api.validateGenerateRequestBody({ script: 'Um roteiro.', aiVideo: true, instructions: '  cenas noturnas  ' });
+    if (!accepted.valid || accepted.value.aiVideo !== true || accepted.value.instructions !== 'cenas noturnas') {
+      throw new Error(`The API did not accept the new options: ${JSON.stringify(accepted)}`);
+    }
+    const defaulted = api.validateGenerateRequestBody({ script: 'Um roteiro.' });
+    if (defaulted.value.aiVideo !== false || defaulted.value.instructions !== null) {
+      throw new Error('Omitted options must default to off');
+    }
+    const tooLong = api.validateGenerateRequestBody({ script: 'Um roteiro.', instructions: 'a'.repeat(2001) });
+    if (tooLong.valid || tooLong.status !== 400) {
+      throw new Error('Instructions longer than 2000 characters must be rejected');
+    }
+
+    // 3. The script agent defines the video style and carries the instructions forward.
+    const savedScripts = [];
+    const scriptWriter = new ScriptWriterAgent({ saveScript: async (script) => savedScripts.push(script) }, {});
+    scriptWriter.aiTextService = { isAvailable: () => false, providerName: 'none' };
+    const strategy = { topic: 'Salmo 23', contentType: 'Story', angle: 'devocional', targetAudience: 'fiéis', keywords: ['salmo'] };
+    const script = await scriptWriter.createScriptFromText('O Senhor é meu pastor.\n\nNada me faltará.', strategy, { instructions: 'cenas noturnas no deserto' });
+
+    if (!script.videoStyle || !script.videoStyle.name || !script.videoStyle.look || !script.videoStyle.motion) {
+      throw new Error(`The script agent did not define a video style: ${JSON.stringify(script.videoStyle)}`);
+    }
+    if (script.instructions !== 'cenas noturnas no deserto') {
+      throw new Error('The instructions did not reach the script');
+    }
+
+    // 4. The storyboard follows the style the script defined, not its own preset.
+    const director = new StoryboardDirectorAgent({}, {});
+    director.aiTextService = { isAvailable: () => false, providerName: 'none' };
+    script.videoStyle = { ...script.videoStyle, name: 'documentary', palette: 'areia e brasa', motion: 'câmera na mão, passos lentos' };
+    const storyboard = await director.generateStoryboard(script, {});
+    if (storyboard.style.palette !== 'areia e brasa' || storyboard.style.motion !== 'câmera na mão, passos lentos') {
+      throw new Error(`The storyboard ignored the style defined by the script: ${JSON.stringify(storyboard.style)}`);
+    }
+    if (!storyboard.shots[0].videoPrompt.includes('câmera na mão')) {
+      throw new Error('The directed motion did not reach the video prompt');
+    }
+    if (storyboard.style.instructions !== 'cenas noturnas no deserto') {
+      throw new Error('The instructions did not reach the storyboard style');
+    }
+
+    // 5. With the option on and Replicate configured, scenes are animated instead of pulled
+    // from stock; when a scene fails, stock still covers it so the production survives.
+    const generator = new AIVideoGenerator({ replicate: { apiKey: 'replicate-test' } });
+    if (!generator.hasAIVideoProvider()) {
+      throw new Error('A Replicate key should enable AI scene video');
+    }
+    const resolvedUrl = await generator.resolveReplicateOutputUrl([{ url: async () => 'https://example.com/clip.mp4' }]);
+    if (resolvedUrl !== 'https://example.com/clip.mp4') {
+      throw new Error(`Replicate output shapes are not resolved: ${resolvedUrl}`);
+    }
+
+    const agent = new ProductionManagementAgent({ saveProductionData: async () => {} }, {});
+    await agent.setupDirectories();
+    const calls = { images: 0, clips: 0, stock: 0 };
+    agent.aiVideoGenerator.hasAIVideoProvider = () => true;
+    agent.aiVideoGenerator.hasStockVideoProvider = () => true;
+    agent.aiVideoGenerator.generateImage = async (_prompt, imagePath) => {
+      calls.images += 1;
+      await fs.writeFile(imagePath, Buffer.from('89504e470d0a1a0a', 'hex'));
+      return imagePath;
+    };
+    agent.aiVideoGenerator.generateSceneVideo = async (prompt, outputPath) => {
+      calls.clips += 1;
+      if (calls.clips === 2) throw new Error('modelo indisponível');
+      await fs.writeFile(outputPath, 'clip');
+      return { path: outputPath, provider: 'Replicate (teste)', seconds: 12 };
+    };
+    agent.aiVideoGenerator.fetchStockVideo = async (_query, outputPath) => {
+      calls.stock += 1;
+      await fs.writeFile(outputPath, 'stock');
+      return { path: outputPath, provider: 'Pexels' };
+    };
+    agent.storage = { enabled: false };
+
+    const events = [];
+    const productionData = {
+      id: `prod_ai_${Date.now()}`,
+      script,
+      storyboard,
+      settings: { aiVideo: true, sceneCount: 3 },
+      assets: {},
+      timeline: {},
+      estimatedDuration: '3:00'
+    };
+    await agent.generateVideoContent(productionData, (stage, progress, message, details) => events.push({ message, details }));
+
+    const sceneAssets = productionData.assets.video.sceneAssets;
+    if (sceneAssets.length !== 3 || calls.clips !== 3) {
+      throw new Error(`Expected three AI scene attempts, got ${calls.clips} for ${sceneAssets.length} scenes`);
+    }
+    if (sceneAssets.filter(scene => scene.generatedBy === 'ai').length !== 2) {
+      throw new Error('The AI clips were not used for the scenes that succeeded');
+    }
+    if (calls.stock !== 1 || sceneAssets[1].provider !== 'Pexels') {
+      throw new Error('Stock footage did not cover the scene the AI refused');
+    }
+    if (productionData.assets.video.generatedWith !== 'AI scenes' || productionData.assets.video.aiScenes !== 2) {
+      throw new Error('The production did not record that scenes came from AI');
+    }
+    if (!events.some(event => event.details?.level === 'warning' && /por IA falhou/.test(event.message))) {
+      throw new Error('The failed AI scene was not reported to the production log');
+    }
+
+    // 6. Asking for AI scenes without Replicate warns instead of failing the production.
+    const withoutReplicate = new ProductionManagementAgent({ saveProductionData: async () => {} }, {});
+    await withoutReplicate.setupDirectories();
+    withoutReplicate.aiVideoGenerator.hasAIVideoProvider = () => false;
+    withoutReplicate.aiVideoGenerator.hasStockVideoProvider = () => true;
+    withoutReplicate.aiVideoGenerator.fetchStockVideo = async (_query, outputPath) => {
+      await fs.writeFile(outputPath, 'stock');
+      return { path: outputPath, provider: 'Pexels' };
+    };
+    withoutReplicate.storage = { enabled: false };
+    const fallbackEvents = [];
+    const fallbackProduction = { id: `prod_nore_${Date.now()}`, script, storyboard, settings: { aiVideo: true, sceneCount: 3 }, assets: {}, timeline: {}, estimatedDuration: '3:00' };
+    await withoutReplicate.generateVideoContent(fallbackProduction, (stage, progress, message, details) => fallbackEvents.push({ message, details }));
+    if (!fallbackEvents.some(event => event.details?.level === 'warning' && /Replicate não está configurado/.test(event.message))) {
+      throw new Error('A missing Replicate key must be reported when AI scenes are requested');
+    }
+
+    await Promise.all([productionData.id, fallbackProduction.id].map(id =>
+      fs.rm(path.join(__dirname, 'data', 'assets', id), { recursive: true, force: true })));
+
+    this.logger.info('AI scene video option test completed successfully');
   }
 
   async testDashboardResponsiveRules() {

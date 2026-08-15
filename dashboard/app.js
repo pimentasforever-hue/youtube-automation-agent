@@ -526,7 +526,7 @@ $('review-script-button').addEventListener('click', async () => {
   message.className = 'form-message';
   message.textContent = 'A IA está analisando o roteiro.';
   try {
-    const response = await request('/api/review-script', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ script, style: $('style').value, targetMinutes: Number($('target-minutes').value), sceneCount: Number($('scene-count').value), privacy: $('privacy').value, narration: $('narration').checked, captions: $('captions').checked, autoPublish: $('auto-publish').checked }) });
+    const response = await request('/api/review-script', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ script, style: $('style').value, targetMinutes: Number($('target-minutes').value), sceneCount: Number($('scene-count').value), privacy: $('privacy').value, instructions: $('instructions').value.trim() || null, aiVideo: $('ai-video').checked, narration: $('narration').checked, captions: $('captions').checked, autoPublish: $('auto-publish').checked }) });
     const result = await response.json();
     if (!response.ok) throw new Error(result.error || 'Não foi possível revisar o roteiro.');
     $('script-review-content').textContent = result.report;
@@ -559,7 +559,7 @@ $('generate-form').addEventListener('submit', async (event) => {
   message.className = 'form-message';
   message.textContent = 'A produção começou. Esta etapa pode levar alguns minutos.';
   try {
-    const response = await request('/generate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ script: $('script-input').value.trim() || null, style: $('style').value, targetMinutes: Number($('target-minutes').value), sceneCount: Number($('scene-count').value), privacy: $('privacy').value, narration: $('narration').checked, captions: $('captions').checked, autoPublish: $('auto-publish').checked }) });
+    const response = await request('/generate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ script: $('script-input').value.trim() || null, style: $('style').value, targetMinutes: Number($('target-minutes').value), sceneCount: Number($('scene-count').value), privacy: $('privacy').value, instructions: $('instructions').value.trim() || null, aiVideo: $('ai-video').checked, narration: $('narration').checked, captions: $('captions').checked, autoPublish: $('auto-publish').checked }) });
     const result = await response.json();
     if (!response.ok) throw new Error(result.error || 'Não foi possível iniciar a produção.');
     message.className = 'form-message success';
