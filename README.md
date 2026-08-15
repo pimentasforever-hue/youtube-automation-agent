@@ -105,6 +105,14 @@ image and video prompts are built from, so a video keeps one look end to end.
 AI scenes need `REPLICATE_API_KEY`. Without it the checkbox is honoured with a warning in the
 production log and the run falls back to stock footage.
 
+Before running a production with AI scenes, validate the key and the model with a single
+paid call instead of one per scene:
+
+```bash
+npm run diagnose:video            # key, model, still provider, stock reserve
+npm run diagnose:video -- --live  # generates one 5s scene and reports what refused it
+```
+
 ## Storyboard Direction
 
 The Storyboard Director sits between the script and the render. It is modelled on
