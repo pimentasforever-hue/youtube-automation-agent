@@ -39,6 +39,7 @@ class AIVideoGenerator {
     this.cloudflareImageModel = process.env.CLOUDFLARE_IMAGE_MODEL
       || '@cf/black-forest-labs/flux-1-schnell';
     this.openaiImageModel = process.env.OPENAI_IMAGE_MODEL || 'gpt-image-2';
+    this.imageProviderCooldowns = new Map();
     this.cloudflareImageSteps = Math.min(8, Math.max(1, Number(process.env.CLOUDFLARE_IMAGE_STEPS) || 4));
     this.cloudflareAI = Boolean(this.cloudflareAccountId && this.cloudflareAIApiToken);
     if (this.cloudflareAI) this.logger.info('Cloudflare Workers AI image service initialized');
@@ -255,29 +256,93 @@ class AIVideoGenerator {
     }
   }
 
+  // Imagens funcionam se QUALQUER provedor tiver credencial: quando o escolhido recusa,
+  // a geração continua pelo próximo da fila em vez de derrubar a produção inteira.
   hasConfiguredImageProvider() {
-    if (this.imageProvider === 'cloudflare') return this.cloudflareAI;
-    if (this.imageProvider === 'openai') return Boolean(this.openai);
-    if (this.imageProvider === 'gemini') return Boolean(this.gemini);
+    return this.imageProviderChain().length > 0;
+  }
+
+  isImageProviderAvailable(provider) {
+    if (provider === 'cloudflare') return Boolean(this.cloudflareAI);
+    if (provider === 'openai') return Boolean(this.openai);
+    if (provider === 'gemini') return Boolean(this.gemini);
     return false;
+  }
+
+  imageProviderChain() {
+    const chain = [];
+    for (const provider of [this.imageProvider, 'cloudflare', 'openai', 'gemini']) {
+      if (provider && !chain.includes(provider) && this.isImageProviderAvailable(provider)) {
+        chain.push(provider);
+      }
+    }
+    return chain;
+  }
+
+  isImageProviderOnCooldown(provider) {
+    const until = this.imageProviderCooldowns.get(provider);
+    return Boolean(until && until > Date.now());
+  }
+
+  // Uma produção pede dezenas de imagens. Sem isso, um provedor sem cota seria chamado
+  // uma vez por cena, gastando minutos para receber o mesmo 429 em cada uma.
+  startImageProviderCooldown(provider, error) {
+    const status = Number(error?.status) || null;
+    const dailyQuotaExhausted = status === 429 && provider === 'cloudflare';
+    const until = dailyQuotaExhausted ? this.nextUtcMidnight() : Date.now() + (status === 429 ? 300000 : 60000);
+    this.imageProviderCooldowns.set(provider, until);
+    this.logger.warn(`Provedor de imagens ${provider} fora da fila até ${new Date(until).toISOString()}`);
+  }
+
+  nextUtcMidnight() {
+    const now = new Date();
+    return Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1, 0, 0, 0, 0);
   }
 
   async generateImage(prompt, imagePath) {
     await fs.mkdir(path.dirname(imagePath), { recursive: true });
 
-    if (this.imageProvider === 'cloudflare' && this.cloudflareAI) {
-      return await this.generateCloudflareImage(prompt, imagePath);
+    const chain = this.imageProviderChain();
+    if (!chain.length) {
+      throw new Error(`O provedor de imagens ${this.imageProvider || 'solicitado'} não está configurado.`);
     }
 
-    if (this.imageProvider === 'openai' && this.openai) {
-      return await this.generateOpenAIImage(prompt, imagePath);
+    // Provedores em cooldown ficam por último em vez de sumirem: se todos falharam
+    // recentemente, ainda vale tentar de novo antes de desistir da imagem.
+    const ready = chain.filter(provider => !this.isImageProviderOnCooldown(provider));
+    const attempts = ready.length ? ready : chain;
+
+    let lastError;
+    for (const provider of attempts) {
+      try {
+        const result = await this.runImageProvider(provider, prompt, imagePath);
+        this.lastImageProvider = provider;
+        if (provider !== this.imageProvider) {
+          this.logger.info(`Imagem gerada pelo provedor reserva ${provider}`);
+        }
+        return result;
+      } catch (error) {
+        lastError = error;
+        this.logger.warn(`Provedor de imagens ${provider} recusou${error.status ? ` (HTTP ${error.status})` : ''}: ${error.message}`);
+        this.startImageProviderCooldown(provider, error);
+      }
     }
 
-    if (this.imageProvider === 'gemini' && this.gemini) {
-      return await this.generateGeminiImage(prompt, imagePath);
-    }
+    throw lastError;
+  }
 
-    throw new Error(`O provedor de imagens ${this.imageProvider || 'solicitado'} não está configurado.`);
+  async runImageProvider(provider, prompt, imagePath) {
+    try {
+      if (provider === 'cloudflare') return await this.generateCloudflareImage(prompt, imagePath);
+      if (provider === 'openai') return await this.generateOpenAIImage(prompt, imagePath);
+      if (provider === 'gemini') return await this.generateGeminiImage(prompt, imagePath);
+      throw new Error(`O provedor de imagens ${provider} não está configurado.`);
+    } catch (error) {
+      const message = provider === 'cloudflare'
+        ? this.formatCloudflareImageError(error)
+        : String(error?.message || `O provedor ${provider} não respondeu.`);
+      throw this.wrapImageError(error, message, provider);
+    }
   }
 
   async generateCloudflareImage(prompt, imagePath) {
@@ -312,11 +377,11 @@ class AIVideoGenerator {
 
   // A mensagem amigável some com o status e o corpo da resposta, que são justamente
   // o que diz por que o provedor recusou. Guarda os dois no erro.
-  wrapImageError(error, message) {
+  wrapImageError(error, message, provider = null) {
     if (error?.isImageProviderError) return error;
     const wrapped = new Error(message);
     wrapped.isImageProviderError = true;
-    wrapped.provider = this.imageProvider || null;
+    wrapped.provider = provider || this.imageProvider || null;
     wrapped.status = Number(error?.response?.status || error?.status) || null;
     wrapped.providerDetail = this.extractProviderDetail(error);
     wrapped.cause = error;
@@ -340,23 +405,27 @@ class AIVideoGenerator {
     const requested = String(process.env.IMAGE_PROVIDER || '').trim().toLowerCase() || null;
     const available = { cloudflare: Boolean(this.cloudflareAI), openai: Boolean(this.openai), gemini: Boolean(this.gemini) };
     const models = { cloudflare: this.cloudflareImageModel, openai: this.openaiImageModel, gemini: process.env.GEMINI_IMAGE_MODEL || 'gemini-3.1-flash-image' };
-    const configured = this.hasConfiguredImageProvider();
+    const chain = this.imageProviderChain();
+    const configured = chain.length > 0;
+    const primaryAvailable = Boolean(this.imageProvider && this.isImageProviderAvailable(this.imageProvider));
 
     let reason = null;
-    if (!this.imageProvider) {
+    if (!configured) {
       reason = 'nenhuma credencial de imagem foi encontrada (Cloudflare Workers AI, OpenAI ou Gemini)';
-    } else if (!configured && requested) {
-      reason = `IMAGE_PROVIDER=${requested} está selecionado, mas as credenciais desse provedor não foram encontradas`;
-    } else if (!configured) {
-      reason = `o provedor ${this.imageProvider} não está configurado`;
+    } else if (requested && !primaryAvailable) {
+      reason = `IMAGE_PROVIDER=${requested} está selecionado, mas sem credenciais desse provedor, a geração usa ${chain[0]}`;
     }
 
     return {
       provider: this.imageProvider || null,
       requested,
       configured,
+      primaryAvailable,
+      chain,
       available,
       model: this.imageProvider ? models[this.imageProvider] || null : null,
+      models,
+      cooldowns: Object.fromEntries(chain.map(provider => [provider, this.imageProviderCooldowns.get(provider) || null])),
       reason
     };
   }

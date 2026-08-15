@@ -45,7 +45,13 @@ async function runImageProviderCheck({ live = false, prompt = 'A calm library at
   console.log(`IMAGE_PROVIDER pedido : ${state.requested || chalk.gray('(não definido, escolha automática)')}`);
   console.log(`Provedor em uso       : ${state.provider || chalk.red('nenhum')}`);
   console.log(`Modelo                : ${state.model || chalk.gray('n/d')}`);
+  console.log(`Ordem de tentativa    : ${state.chain.length ? state.chain.join(' → ') : chalk.red('nenhum provedor disponível')}`);
   console.log(`Credenciais presentes : cloudflare=${state.available.cloudflare} openai=${state.available.openai} gemini=${state.available.gemini}`);
+
+  const paused = Object.entries(state.cooldowns).filter(([, until]) => until && until > Date.now());
+  if (paused.length) {
+    console.log(chalk.yellow(`Fora da fila          : ${paused.map(([provider, until]) => `${provider} até ${new Date(until).toISOString()}`).join(', ')}`));
+  }
 
   console.log(chalk.cyan('\nCredenciais lidas:'));
   for (const [name, value] of Object.entries(credentialSnapshot(credentials))) {
@@ -58,7 +64,10 @@ async function runImageProviderCheck({ live = false, prompt = 'A calm library at
     return { ...state, live: false, ok: false };
   }
 
-  console.log(chalk.green(`\n✓ ${state.provider} está configurado.`));
+  if (state.reason) {
+    console.log(chalk.yellow(`\n! ${state.reason}`));
+  }
+  console.log(chalk.green(`\n✓ Geração de imagens disponível. Provedor inicial: ${state.chain[0]}${state.chain.length > 1 ? `, reservas: ${state.chain.slice(1).join(', ')}` : ' (sem reserva configurada)'}`));
 
   if (!live) {
     console.log(chalk.gray('Rode com --live para gerar uma imagem de teste e ver a resposta do provedor.'));
@@ -72,10 +81,13 @@ async function runImageProviderCheck({ live = false, prompt = 'A calm library at
     const started = Date.now();
     await generator.generateImage(prompt, outputPath);
     const stats = await fs.stat(outputPath);
-    console.log(chalk.green(`✓ Imagem gerada em ${Math.round((Date.now() - started) / 1000)}s (${Math.round(stats.size / 1024)} KB): ${outputPath}`));
-    return { ...state, live: true, ok: true, outputPath };
+    console.log(chalk.green(`✓ Imagem gerada por ${generator.lastImageProvider} em ${Math.round((Date.now() - started) / 1000)}s (${Math.round(stats.size / 1024)} KB): ${outputPath}`));
+    if (generator.lastImageProvider !== state.provider) {
+      console.log(chalk.yellow(`  O provedor principal (${state.provider}) recusou e a reserva assumiu, veja o aviso acima.`));
+    }
+    return { ...state, live: true, ok: true, outputPath, servedBy: generator.lastImageProvider };
   } catch (error) {
-    console.log(chalk.red(`✗ O provedor recusou: ${error.message}`));
+    console.log(chalk.red(`✗ Todos os provedores da fila recusaram. Último erro: ${error.message}`));
     if (error.status) console.log(chalk.red(`  HTTP ${error.status}`));
     if (error.providerDetail) console.log(chalk.gray(`  Resposta: ${error.providerDetail}`));
     console.log(chalk.gray('\nLeitura rápida:'));

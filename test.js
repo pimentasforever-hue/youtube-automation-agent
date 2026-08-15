@@ -889,12 +889,15 @@ class SystemTest {
         throw new Error('The provider description must report which image model is in use');
       }
 
-      // The failure mode that reads as "the thumbnail just fails": IMAGE_PROVIDER points at a
-      // provider with no keys, so nothing can generate images even though other keys exist.
+      // IMAGE_PROVIDER pointing at a provider with no keys must be reported, but it must not
+      // disable image generation while another provider is configured.
       process.env.IMAGE_PROVIDER = 'openai';
       const mismatch = new AIVideoGenerator(cloudflareCreds).describeImageProvider();
-      if (mismatch.configured || !/IMAGE_PROVIDER=openai/.test(mismatch.reason || '')) {
-        throw new Error(`A provider mismatch must be reported: ${JSON.stringify(mismatch)}`);
+      if (!mismatch.configured || mismatch.primaryAvailable || !/IMAGE_PROVIDER=openai/.test(mismatch.reason || '')) {
+        throw new Error(`A provider mismatch must be reported without disabling images: ${JSON.stringify(mismatch)}`);
+      }
+      if (mismatch.chain[0] !== 'cloudflare') {
+        throw new Error('The configured provider should take over when the requested one has no keys');
       }
       delete process.env.IMAGE_PROVIDER;
 
@@ -924,6 +927,43 @@ class SystemTest {
       if (!/permissão/i.test(thrown.message)) {
         throw new Error('The 403 was not translated into a readable reason');
       }
+
+      // The real outage: Cloudflare answers 429 (daily neuron allocation spent) while a Gemini
+      // key sits idle. The image must come from the reserve instead of failing the production,
+      // and the exhausted provider must not be called again for every remaining scene.
+      const withReserve = new AIVideoGenerator({ ...cloudflareCreds, gemini: { apiKey: 'gemini-test' } });
+      if (withReserve.imageProviderChain().join(',') !== 'cloudflare,gemini') {
+        throw new Error(`Unexpected provider chain: ${withReserve.imageProviderChain().join(',')}`);
+      }
+
+      let cloudflareCalls = 0;
+      let geminiCalls = 0;
+      withReserve.generateCloudflareImage = async () => {
+        cloudflareCalls += 1;
+        const quota = new Error('Request failed with status code 429');
+        quota.response = { status: 429, data: { errors: [{ code: 4006, message: 'daily free allocation' }] } };
+        throw quota;
+      };
+      withReserve.generateGeminiImage = async (_prompt, imagePath) => {
+        geminiCalls += 1;
+        return imagePath;
+      };
+
+      const firstPath = path.join(require('os').tmpdir(), `reserve-1-${Date.now()}.png`);
+      const secondPath = path.join(require('os').tmpdir(), `reserve-2-${Date.now()}.png`);
+      await withReserve.generateImage('cena 1', firstPath);
+      if (withReserve.lastImageProvider !== 'gemini' || geminiCalls !== 1) {
+        throw new Error('The reserve provider did not take over after the quota error');
+      }
+
+      await withReserve.generateImage('cena 2', secondPath);
+      if (cloudflareCalls !== 1) {
+        throw new Error(`The exhausted provider was called again (${cloudflareCalls} times) instead of staying on cooldown`);
+      }
+      if (geminiCalls !== 2) {
+        throw new Error('The reserve provider should serve every following scene');
+      }
+      await Promise.all([firstPath, secondPath].map(file => require('fs').promises.unlink(file).catch(() => {})));
 
       // A failed AI thumbnail has to reach the production log, not just the process log.
       const agent = new ProductionManagementAgent({}, cloudflareCreds);

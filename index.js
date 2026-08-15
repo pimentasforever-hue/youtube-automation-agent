@@ -138,7 +138,7 @@ class YouTubeAutomationAgent {
 
     const capabilities = [
       { name: 'Script & strategy generation', ok: hasText, hint: 'configure an AI provider (npm run credentials:setup)' },
-      { name: `Image generation (visuals/thumbnails)${imageProvider.configured ? ` , ${imageProvider.provider} (${imageProvider.model})` : ''}`, ok: hasImages, hint: `${imageProvider.reason || 'no image provider configured'} , set IMAGE_PROVIDER plus the keys of that provider (npm run diagnose:images)` },
+      { name: `Image generation (visuals/thumbnails)${imageProvider.configured ? ` , ${imageProvider.chain.join(' > ')}` : ''}`, ok: hasImages, hint: `${imageProvider.reason || 'no image provider configured'} , set IMAGE_PROVIDER plus the keys of that provider (npm run diagnose:images)` },
       { name: 'Voice narration (TTS)', ok: hasTTS, hint: 'configure OpenAI, Gemini, ElevenLabs, or Azure Speech , otherwise videos are silent' },
       { name: 'Video assembly (FFmpeg)', ok: hasFFmpeg, hint: ffmpegInstallHint() },
       { name: 'YouTube upload', ok: hasUpload, hint: 'run: npm run credentials:setup' }
