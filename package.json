@@ -11,6 +11,7 @@
     "test": "node test.js",
     "agent:strategy": "node agents/content-strategy-agent.js",
     "agent:script": "node agents/script-writer-agent.js",
+    "agent:storyboard": "node agents/storyboard-director-agent.js",
     "agent:thumbnail": "node agents/thumbnail-designer-agent.js",
     "agent:seo": "node agents/seo-optimizer-agent.js",
     "agent:production": "node agents/production-management-agent.js",

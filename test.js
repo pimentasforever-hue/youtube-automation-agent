@@ -29,6 +29,7 @@ class SystemTest {
       { name: 'Gemini Media Provider Selection', test: () => this.testGeminiMediaProvider() },
       { name: 'Cloudflare Image Provider', test: () => this.testCloudflareImageProvider() },
       { name: 'Cinematic Hybrid Renderer', test: () => this.testHybridRenderer() },
+      { name: 'Storyboard Director Agent', test: () => this.testStoryboardDirector() },
       { name: 'Evergreen Template Topics', test: () => this.testEvergreenTopics() },
       { name: 'Walkthrough Module', test: () => this.testWalkthroughModule() },
       { name: 'Logger System', test: () => this.testLogger() },
@@ -656,6 +657,142 @@ class SystemTest {
     this.logger.info('Cinematic hybrid renderer test completed successfully');
   }
 
+  async testStoryboardDirector() {
+    const { StoryboardDirectorAgent, buildStoryboardPrompts } = require('./agents/storyboard-director-agent');
+
+    const db = new Database();
+    await db.initialize();
+
+    const agent = new StoryboardDirectorAgent(db, {});
+    // Force the offline template path so the test never depends on an AI provider.
+    agent.aiTextService = { isAvailable: () => false, providerName: 'none' };
+    await agent.initialize();
+
+    const script = {
+      title: 'How Solar Batteries Work',
+      duration: '4:00',
+      tone: 'informative',
+      pacing: 'medium',
+      keywords: ['solar', 'battery', 'storage'],
+      hook: { text: 'Your roof makes power at noon and your house needs it at night.' },
+      introduction: { greeting: 'Here is the part nobody explains.', topicIntro: 'Storage is the missing link.' },
+      mainContent: {
+        sections: [
+          { title: 'Charging the cells', content: ['Panels push direct current into the pack.'], duration: 60 },
+          { title: 'Discharging at night', content: ['The inverter turns stored charge back into household power.'], duration: 60 }
+        ]
+      },
+      conclusion: { summary: 'Storage decides how much of your own power you actually use.' },
+      callToAction: { subscribe: 'Subscribe for more energy breakdowns.' },
+      metadata: { strategy: { topic: 'solar batteries', contentType: 'Explainer' } }
+    };
+
+    const storyboard = await agent.generateStoryboard(script, { sceneCount: 12 });
+
+    if (!storyboard.id) {
+      throw new Error('Storyboard was not persisted , no id assigned');
+    }
+    if (storyboard.scenes.length < 4) {
+      throw new Error(`Expected at least 4 scenes from the script beats, got ${storyboard.scenes.length}`);
+    }
+    if (storyboard.shots.length < storyboard.scenes.length) {
+      throw new Error('Every scene must contribute at least one shot');
+    }
+    if (storyboard.metadata.generationSource !== 'template') {
+      throw new Error('Storyboard should fall back to the template path with no AI provider');
+    }
+
+    const opening = storyboard.shots[0];
+    if (opening.shotSize !== 'extreme wide shot') {
+      throw new Error(`The opening shot must establish the space, got "${opening.shotSize}"`);
+    }
+
+    for (const shot of storyboard.shots) {
+      if (!Number.isInteger(shot.camIdx)) {
+        throw new Error(`Shot ${shot.idx} has no camera assigned`);
+      }
+      if (!shot.imagePrompt || !shot.videoPrompt) {
+        throw new Error(`Shot ${shot.idx} is missing render prompts`);
+      }
+      if (!shot.firstFrame || !shot.lastFrame || !shot.motion) {
+        throw new Error(`Shot ${shot.idx} is missing the first frame / last frame / motion decomposition`);
+      }
+      if (shot.durationSeconds < 3 || shot.durationSeconds > 15) {
+        throw new Error(`Shot ${shot.idx} runs ${shot.durationSeconds}s, outside the 3-15s window`);
+      }
+      if (!['small', 'medium', 'large'].includes(shot.variationType)) {
+        throw new Error(`Shot ${shot.idx} has an invalid variation type: ${shot.variationType}`);
+      }
+    }
+
+    // A camera that performs a significant move cannot be reused afterwards.
+    for (const camera of storyboard.cameras) {
+      const movements = camera.activeShotIdxs.map(idx => storyboard.shots[idx].movement);
+      const retiringMove = movements.slice(0, -1).find(movement => ['slow dolly in', 'slow dolly out', 'tracking shot', 'crane up', 'drone fly-over'].includes(movement));
+      if (retiringMove) {
+        throw new Error(`Camera ${camera.idx} was reused after a "${retiringMove}" move`);
+      }
+    }
+
+    if (!storyboard.continuity || !Array.isArray(storyboard.continuity.warnings)) {
+      throw new Error('Storyboard is missing its continuity report');
+    }
+    if (storyboard.cameras.length >= storyboard.shots.length) {
+      throw new Error('No camera was reused , the board invents a new setup for every shot');
+    }
+
+    const plan = buildStoryboardPrompts(storyboard, 12);
+    if (plan.length !== 12) {
+      throw new Error(`buildStoryboardPrompts should honour the requested scene count, got ${plan.length}`);
+    }
+    if (plan.some(entry => !entry.prompt || !entry.videoPrompt)) {
+      throw new Error('buildStoryboardPrompts produced an entry without prompts');
+    }
+    if (buildStoryboardPrompts(null, 8).length !== 0) {
+      throw new Error('buildStoryboardPrompts must return an empty plan when there is no storyboard');
+    }
+
+    const stored = await db.getStoryboard(storyboard.id);
+    if (!stored || stored.shots.length !== storyboard.shots.length || stored.title !== script.title) {
+      throw new Error('Storyboard did not survive the database round trip');
+    }
+
+    // AI path: fenced JSON must parse, unusable shots must be dropped, and scenes the model
+    // skipped must be back-filled from the template so no beat is left without coverage.
+    const aiAgent = new StoryboardDirectorAgent(db, {});
+    aiAgent.aiTextService = {
+      isAvailable: () => true,
+      providerName: 'stub',
+      generateText: async (prompt) => prompt.includes('visual bible')
+        ? '```json\n{"subjects":[{"identifier":"Rooftop array","staticFeatures":"matte blue panels in a grid","dynamicFeatures":"morning dew on the glass"}],"environments":[{"slugline":"EXT. ROOFTOP , DAY","description":"A flat roof with a panel array and city haze behind it"}],"motifs":["hard sunlight"]}\n```'
+        : '{"shots":[' +
+          '{"sceneIdx":0,"purpose":"open on the array","shotSize":"extreme wide shot","angle":"aerial view","movement":"drone fly-over","subjects":["Rooftop array"],"firstFrame":"Extreme wide shot at aerial view of the rooftop array, panels filling the lower frame.","lastFrame":"Extreme wide shot at aerial view, the array now angled across the frame.","motion":"Camera: drone fly-over moving right. In frame: light sweeps across the panels.","variationType":"large"},' +
+          '{"sceneIdx":1,"purpose":"introduce the storage","shotSize":"medium shot","angle":"eye level","movement":"static","subjects":["Ghost subject"],"firstFrame":"Medium shot at eye level of a wall mounted battery, centred in frame.","lastFrame":"Medium shot at eye level, an indicator light now glows on the casing.","motion":"Camera: static. In frame: an indicator light fades up.","variationType":"small"},' +
+          '{"sceneIdx":0,"purpose":"unusable","shotSize":"close-up","angle":"eye level","movement":"static","subjects":[],"firstFrame":"","motion":""}' +
+          ']}'
+    };
+
+    const aiStoryboard = await aiAgent.generateStoryboard(script, { sceneCount: 12 });
+
+    if (aiStoryboard.metadata.generationSource !== 'ai' || aiStoryboard.visualBible.source !== 'ai') {
+      throw new Error('Storyboard did not use the AI path when a provider was available');
+    }
+    if (aiStoryboard.shots.filter(shot => shot.source === 'ai').length !== 2) {
+      throw new Error('The AI shot list should keep exactly the two usable shots');
+    }
+    const coveredScenes = new Set(aiStoryboard.shots.map(shot => shot.sceneIdx));
+    if (coveredScenes.size !== aiStoryboard.scenes.length) {
+      throw new Error('Scenes skipped by the model were not back-filled from templates');
+    }
+    if (!aiStoryboard.continuity.warnings.some(warning => warning.includes('Ghost subject'))) {
+      throw new Error('Continuity review did not flag the subject missing from the visual bible');
+    }
+
+    await db.executeQuery('DELETE FROM storyboards WHERE id IN (?, ?)', [storyboard.id, aiStoryboard.id]);
+    await db.close();
+    this.logger.info('Storyboard director test completed successfully');
+  }
+
   async testEvergreenTopics() {
     const { ContentStrategyAgent } = require('./agents/content-strategy-agent');
     const agent = new ContentStrategyAgent(null, {});
@@ -769,6 +906,7 @@ class SystemTest {
     const agentFiles = [
       './agents/content-strategy-agent',
       './agents/script-writer-agent',
+      './agents/storyboard-director-agent',
       './agents/thumbnail-designer-agent',
       './agents/seo-optimizer-agent',
       './agents/production-management-agent',

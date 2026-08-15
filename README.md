@@ -61,9 +61,11 @@ If this saves you time, a star helps it reach more developers.
 ```mermaid
 graph TD
     A[Content Strategy Agent] --> B[Script Writer Agent]
+    B --> S[Storyboard Director Agent]
     B --> C[Thumbnail Designer Agent]
     B --> D[SEO Optimizer Agent]
-    C --> E[Production Management Agent]
+    S --> E[Production Management Agent]
+    C --> E
     D --> E
     E --> F[Publishing & Scheduling Agent]
     F --> G[Analytics & Optimization Agent]
@@ -78,11 +80,46 @@ Each agent handles one stage of the pipeline:
 |-------|------|
 | **Content Strategy** | Analyzes YouTube trends, identifies topics, plans content calendar |
 | **Script Writer** | Generates scripts with hooks, storytelling, CTAs |
+| **Storyboard Director** | Breaks the script into scenes and shots, keeps camera and subject continuity, writes the render prompts |
 | **Thumbnail Designer** | Creates thumbnails, runs A/B variations |
 | **SEO Optimizer** | Keywords, titles, descriptions, tags |
 | **Production** | Coordinates TTS audio, image assets, video assembly |
 | **Publishing** | Uploads, schedules, manages playlists |
 | **Analytics** | Tracks performance, feeds insights back to strategy |
+
+## Storyboard Direction
+
+The Storyboard Director sits between the script and the render. It is modelled on
+[ViMax](https://github.com/hkuds/vimax), which splits video generation into a director, a
+screenwriter and a producer instead of prompting an image model once per scene. The same
+decomposition applies here:
+
+```mermaid
+graph LR
+    SC[Script] --> SCN[Scene extraction]
+    SCN --> VB[Visual bible<br/>subjects + environments]
+    VB --> SH[Shot design<br/>size, angle, movement]
+    SH --> DEC[First frame / last frame / motion]
+    DEC --> CAM[Camera continuity]
+    CAM --> PR[Image + video prompts]
+```
+
+What each stage contributes:
+
+- **Scene extraction** turns the script beats (hook, intro, sections, conclusion, CTA) into scenes with their own slugline and narration budget.
+- **Visual bible** records every recurring subject as static features (what never changes) and dynamic features (clothing, props), so the same subject can be re-rendered across shots without drifting.
+- **Shot design** assigns a shot size, a camera angle and a camera movement to each shot, with a narrative purpose attached.
+- **Decomposition** splits every shot into a first frame, a last frame and the motion between them. The frames are pure snapshots; the motion line separates camera movement from subject movement.
+- **Camera continuity** reuses a camera when the framing matches and retires it once it performs a significant move, so shots that should match actually match.
+- **Prompts** are built from those pieces: the first frame drives the image prompt, the motion drives the video prompt, and the subject features are appended to both.
+
+The agent runs the whole board through one AI call and falls back to a deterministic
+template board when no provider is configured, so the pipeline never stalls on a missing key.
+Every storyboard is stored in the `storyboards` table together with its continuity report.
+
+```bash
+npm run agent:storyboard
+```
 
 ## AI Providers
 

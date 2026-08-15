@@ -8,6 +8,7 @@ const { Database } = require('./database/db');
 const { CredentialManager } = require('./utils/credential-manager');
 const { ContentStrategyAgent } = require('./agents/content-strategy-agent');
 const { ScriptWriterAgent } = require('./agents/script-writer-agent');
+const { StoryboardDirectorAgent } = require('./agents/storyboard-director-agent');
 const { ThumbnailDesignerAgent } = require('./agents/thumbnail-designer-agent');
 const { SEOOptimizerAgent } = require('./agents/seo-optimizer-agent');
 const { ProductionManagementAgent } = require('./agents/production-management-agent');
@@ -100,6 +101,7 @@ class YouTubeAutomationAgent {
     this.agents = {
       strategy: new ContentStrategyAgent(this.db, this.credentials),
       scriptWriter: new ScriptWriterAgent(this.db, this.credentials),
+      storyboardDirector: new StoryboardDirectorAgent(this.db, this.credentials),
       thumbnailDesigner: new ThumbnailDesignerAgent(this.db, this.credentials),
       seoOptimizer: new SEOOptimizerAgent(this.db, this.credentials),
       production: new ProductionManagementAgent(this.db, this.credentials),
@@ -941,22 +943,32 @@ class YouTubeAutomationAgent {
       : await this.agents.scriptWriter.generateScript(strategy, { targetMinutes: strategy.targetMinutes });
     this.logger.info(`Script generated: ${script.title}`);
     
-    // Step 3: Thumbnail Design
-    if (jobId) this.updateProductionJob(jobId, 'thumbnail', 40, 'Criando a miniatura');
+    // Step 3: Storyboard Direction
+    if (jobId) this.updateProductionJob(jobId, 'storyboard', 34, 'Planejando os planos e a continuidade visual');
+    const storyboard = await this.agents.storyboardDirector.generateStoryboard(script, {
+      style,
+      sceneCount: options.sceneCount,
+      aspectRatio: options.aspectRatio
+    });
+    this.logger.info(`Storyboard designed: ${storyboard.shots.length} shots, ${storyboard.cameras.length} cameras`);
+    
+    // Step 4: Thumbnail Design
+    if (jobId) this.updateProductionJob(jobId, 'thumbnail', 42, 'Criando a miniatura');
     const thumbnail = await this.agents.thumbnailDesigner.generateThumbnail(script);
     this.logger.info('Thumbnail generated');
     
-    // Step 4: SEO Optimization
+    // Step 5: SEO Optimization
     if (jobId) this.updateProductionJob(jobId, 'seo', 52, 'Preparando título, descrição e SEO');
     const seoData = await this.agents.seoOptimizer.optimize(script, strategy);
     this.logger.info('SEO optimization complete');
     
-    // Step 5: Production Management
+    // Step 6: Production Management
     if (jobId) this.updateProductionJob(jobId, 'production', 65, 'Gerando áudio, cenas e legendas');
     const productionData = await this.agents.production.processContent({
       productionId: options.productionId || (jobId ? `prod_${jobId}` : null),
       strategy,
       script,
+      storyboard,
       thumbnail,
       seo: seoData,
       options,
@@ -967,11 +979,11 @@ class YouTubeAutomationAgent {
     productionData.settings = options;
     this.logger.info('Production processing complete');
 
-    // Step 6: Save to database
+    // Step 7: Save to database
     const contentId = await this.db.saveProductionData(productionData);
     this.logger.info(`Content saved with ID: ${contentId}`);
 
-    // Step 7: Add to the publish queue (skipped automatically for simulated output)
+    // Step 8: Add to the publish queue (skipped automatically for simulated output)
     if (jobId) this.updateProductionJob(jobId, 'scheduling', 96, 'Salvando e preparando a publicação');
     const scheduleEntry = options.autoPublish === false ? null : await this.agents.publishing.scheduleContent(productionData);
     if (scheduleEntry) {

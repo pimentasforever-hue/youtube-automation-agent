@@ -72,6 +72,26 @@ class Database {
         FOREIGN KEY (strategy_id) REFERENCES content_strategies(id)
       )`,
       
+      // Storyboards
+      `CREATE TABLE IF NOT EXISTS storyboards (
+        id TEXT PRIMARY KEY,
+        script_id TEXT,
+        title TEXT NOT NULL,
+        style TEXT,
+        scene_count INTEGER DEFAULT 0,
+        shot_count INTEGER DEFAULT 0,
+        camera_count INTEGER DEFAULT 0,
+        total_duration INTEGER DEFAULT 0,
+        visual_bible TEXT,
+        scenes TEXT,
+        shots TEXT,
+        cameras TEXT,
+        continuity TEXT,
+        generation_source TEXT,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (script_id) REFERENCES scripts(id)
+      )`,
+
       // Thumbnails
       `CREATE TABLE IF NOT EXISTS thumbnails (
         id TEXT PRIMARY KEY,
@@ -320,6 +340,75 @@ class Database {
       ]
     );
     return id;
+  }
+
+  // Storyboard methods
+  async saveStoryboard(storyboard) {
+    const id = this.generateId('storyboard');
+    storyboard.id = id;
+    await this.executeQuery(
+      `INSERT INTO storyboards (
+        id, script_id, title, style, scene_count, shot_count, camera_count,
+        total_duration, visual_bible, scenes, shots, cameras, continuity, generation_source
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        id,
+        storyboard.scriptId || null,
+        storyboard.title,
+        JSON.stringify(storyboard.style),
+        storyboard.scenes?.length || 0,
+        storyboard.shots?.length || 0,
+        storyboard.cameras?.length || 0,
+        storyboard.totalDuration || 0,
+        JSON.stringify(storyboard.visualBible),
+        JSON.stringify(storyboard.scenes),
+        JSON.stringify(storyboard.shots),
+        JSON.stringify(storyboard.cameras),
+        JSON.stringify(storyboard.continuity),
+        storyboard.metadata?.generationSource || 'template'
+      ]
+    );
+    return id;
+  }
+
+  async getStoryboard(id) {
+    const row = await this.getRow('SELECT * FROM storyboards WHERE id = ?', [id]);
+    return row ? this.parseStoryboardRow(row) : null;
+  }
+
+  async getStoryboards(limit = 20) {
+    const rows = await this.getAllRows('SELECT * FROM storyboards ORDER BY created_at DESC LIMIT ?', [limit]);
+    return rows.map(row => this.parseStoryboardRow(row));
+  }
+
+  parseStoryboardRow(row) {
+    const parse = (value, fallback) => {
+      try {
+        return value ? JSON.parse(value) : fallback;
+      } catch (error) {
+        return fallback;
+      }
+    };
+
+    return {
+      id: row.id,
+      scriptId: row.script_id,
+      title: row.title,
+      style: parse(row.style, null),
+      totalDuration: row.total_duration,
+      visualBible: parse(row.visual_bible, null),
+      scenes: parse(row.scenes, []),
+      shots: parse(row.shots, []),
+      cameras: parse(row.cameras, []),
+      continuity: parse(row.continuity, null),
+      metadata: {
+        sceneCount: row.scene_count,
+        shotCount: row.shot_count,
+        cameraCount: row.camera_count,
+        generationSource: row.generation_source
+      },
+      createdAt: row.created_at
+    };
   }
 
   // Thumbnail methods

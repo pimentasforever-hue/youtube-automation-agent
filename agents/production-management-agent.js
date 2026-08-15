@@ -4,6 +4,7 @@ const { Logger } = require('../utils/logger');
 const { AIVideoGenerator } = require('../utils/ai-video-generator');
 const { R2Storage } = require('../utils/r2-storage');
 const { runFFmpeg, probeMediaDuration } = require('../utils/ffmpeg');
+const { buildStoryboardPrompts } = require('./storyboard-director-agent');
 
 class ProductionManagementAgent {
   constructor(db, credentials) {
@@ -52,7 +53,7 @@ class ProductionManagementAgent {
     try {
       this.logger.info('Processing content for production...');
       
-      const { strategy, script, thumbnail, seo, options = {}, onProgress = () => {} } = contentData;
+      const { strategy, script, thumbnail, seo, storyboard = null, options = {}, onProgress = () => {} } = contentData;
       
       // Create production entry
       const productionId = contentData.productionId || this.generateProductionId();
@@ -63,6 +64,7 @@ class ProductionManagementAgent {
         script,
         thumbnail,
         seo,
+        storyboard,
         status: 'processing',
         assets: {
           script: await this.processScript(script),
@@ -323,11 +325,19 @@ class ProductionManagementAgent {
     this.logger.info('Generating cinematic hybrid video content...');
     
     try {
-      const { strategy, script } = productionData;
+      const { script, storyboard } = productionData;
       
       const requestedScenes = Math.min(180, Math.max(3, Number(productionData.settings?.sceneCount) || 8));
+      // A storyboard carries per shot framing, camera continuity and motion, so it replaces
+      // the generic prompt cycling. Without one the previous template behaviour still applies.
+      const shotPlan = buildStoryboardPrompts(storyboard, requestedScenes);
       const basePrompts = this.createVisualPromptsFromScript(script);
-      const visualPrompts = Array.from({ length: requestedScenes }, (_, index) => `${basePrompts[index % basePrompts.length]}, cena ${index + 1} de ${requestedScenes}, composição visual distinta`);
+      const visualPrompts = shotPlan.length > 0
+        ? shotPlan.map(shot => shot.prompt)
+        : Array.from({ length: requestedScenes }, (_, index) => `${basePrompts[index % basePrompts.length]}, cena ${index + 1} de ${requestedScenes}, composição visual distinta`);
+      if (shotPlan.length > 0) {
+        this.logger.info(`Using storyboard shot plan: ${shotPlan.length} shots, ${storyboard.cameras?.length || 0} cameras`);
+      }
       const visualAssets = [];
       const uploadedVisuals = [];
       const sceneAssets = [];
@@ -341,7 +351,7 @@ class ProductionManagementAgent {
         if (this.aiVideoGenerator.hasStockVideoProvider()) {
           try {
             const clipPath = path.join(sceneDirectory, `scene-${String(index + 1).padStart(4, '0')}.mp4`);
-            scene = await this.aiVideoGenerator.fetchStockVideo(prompt, clipPath, usedStockIds);
+            scene = await this.aiVideoGenerator.fetchStockVideo(shotPlan[index]?.stockQuery || prompt, clipPath, usedStockIds);
           } catch (error) {
             this.logger.warn(`Stock video unavailable for scene ${index + 1}: ${error.message}`);
           }
@@ -379,6 +389,7 @@ class ProductionManagementAgent {
         visualAssets: visualAssets,
         uploadedVisuals,
         sceneAssets,
+        shotPlan,
         duration: productionData.estimatedDuration,
         format: 'mp4',
         resolution: '1920x1080',
